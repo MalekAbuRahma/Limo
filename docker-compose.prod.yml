@@ -1,0 +1,58 @@
+# Production stack: PostgreSQL (persistent volume) + FleetFlow app
+# Usage on server:
+#   cp .env.production.example .env   # edit secrets
+#   docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fleetflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-vip_limousine_cars}
+    volumes:
+      - fleetflow_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - fleetflow_net
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fleetflow-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      SERVE_STATIC: '1'
+      API_PORT: '3000'
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vip_limousine_cars}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports:
+      - '${APP_PORT:-80}:3000'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/api/health']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    networks:
+      - fleetflow_net
+
+volumes:
+  fleetflow_pgdata:
+    name: fleetflow_pgdata
+
+networks:
+  fleetflow_net:
+    name: fleetflow_net

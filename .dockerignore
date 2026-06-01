@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.env
+.env.local
+*.log
+data/*.db
+data/*.db-wal
+data/*.db-shm
+.vscode
+.idea
+*.bat
+agent-transcripts
+terminals

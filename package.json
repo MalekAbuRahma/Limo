@@ -1,0 +1,40 @@
+{
+  "name": "fleetflow---car-rental-&-finance-dashboard",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node node_modules/vite/bin/vite.js --host",
+    "start": "node node_modules/vite/bin/vite.js --host",
+    "server": "npx tsx server/index.js",
+    "db:init": "npx tsx -e \"import('dotenv/config');import('./server/db.js').then(m=>m.initDb().then(()=>console.log('Schema ready'))).catch(e=>{console.error(e);process.exit(1)})\"",
+    "db:migrate": "npx tsx scripts/migrate-sqlite-to-pg.mjs",
+    "start:all": "node scripts/start-all.mjs",
+    "build": "node node_modules/vite/bin/vite.js build",
+    "preview": "node node_modules/vite/bin/vite.js preview --host",
+    "stop": "node scripts/stop-server.mjs",
+    "test:calc": "npx tsx scripts/test-calculations.mjs",
+    "test:sample": "npx tsx scripts/test-sample-data.mjs",
+    "test:filters": "npx tsx scripts/test-entry-filters.mjs",
+    "test:integration": "npx tsx scripts/test-integration.mjs",
+    "test:all": "node scripts/test-all.mjs"
+  },
+  "dependencies": {
+    "@google/genai": "^1.40.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.5.0",
+    "exceljs": "^4.4.0",
+    "express": "^4.22.2",
+    "pg": "^8.16.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "recharts": "^3.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "sql.js": "^1.14.1",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}

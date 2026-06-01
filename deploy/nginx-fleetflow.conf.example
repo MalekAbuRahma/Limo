@@ -1,0 +1,12 @@
+# Optional: Apache/cPanel reverse proxy to FleetFlow on port 8080
+# Place in a subdomain vhost or include from cPanel "Include" directives.
+
+<VirtualHost *:443>
+    ServerName fleetflow.yourdomain.com
+
+    ProxyPreserveHost On
+    ProxyPass / http://127.0.0.1:8080/
+    ProxyPassReverse / http://127.0.0.1:8080/
+
+    # SSL: use AutoSSL / Let's Encrypt in cPanel for this vhost
+</VirtualHost>
