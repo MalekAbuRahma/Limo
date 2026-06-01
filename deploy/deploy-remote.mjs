@@ -5,7 +5,7 @@
  */
 import { Client } from 'ssh2';
 import { execSync } from 'child_process';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
@@ -75,19 +75,9 @@ function connect() {
 const archive = join(process.env.TEMP || '/tmp', 'fleetflow-deploy.tar.gz');
 console.log('Creating archive...');
 execSync(
-  `tar -czf "${archive}" --exclude=node_modules --exclude=dist --exclude=.git --exclude="*.bat" --exclude=data .`,
+  `tar -czf "${archive}" --exclude=node_modules --exclude=dist --exclude=.git --exclude="*.bat" --exclude=data --exclude=.env --exclude=.env.local --exclude=.env.deploy .`,
   { cwd: projectRoot, stdio: 'inherit' }
 );
-
-const pgPass = randomBytes(16).toString('base64url');
-const envBody = `POSTGRES_USER=postgres
-POSTGRES_PASSWORD=${pgPass}
-POSTGRES_DB=vip_limousine_cars
-APP_PORT=${appPort}
-GEMINI_API_KEY=
-`;
-const envLocal = join(projectRoot, 'deploy', '.env.deploy');
-writeFileSync(envLocal, envBody);
 
 const setupSh = readFileSync(join(__dirname, 'setup-server.sh'), 'utf8');
 
@@ -104,12 +94,36 @@ try {
   await upload(conn, archive, '/tmp/fleetflow-deploy.tar.gz');
   await exec(
     conn,
+    `cp -f ${remoteDir}/.env /tmp/fleetflow.env.bak 2>/dev/null || true`
+  );
+  await exec(
+    conn,
     `tar -xzf /tmp/fleetflow-deploy.tar.gz -C ${remoteDir} && rm -f /tmp/fleetflow-deploy.tar.gz`
   );
+  await exec(
+    conn,
+    `test -f /tmp/fleetflow.env.bak && cp -f /tmp/fleetflow.env.bak ${remoteDir}/.env && chmod 600 ${remoteDir}/.env && rm -f /tmp/fleetflow.env.bak`
+  );
 
-  const envB64 = Buffer.from(envBody, 'utf8').toString('base64');
-  await exec(conn, `echo ${envB64} | base64 -d > ${remoteDir}/.env && chmod 600 ${remoteDir}/.env`);
-  await exec(conn, `test -s ${remoteDir}/.env && grep -q POSTGRES_PASSWORD= ${remoteDir}/.env && echo .env ok`);
+  const hasEnv = await exec(
+    conn,
+    `test -f ${remoteDir}/.env && grep -q '^POSTGRES_PASSWORD=.' ${remoteDir}/.env && echo yes || echo no`,
+    30000
+  );
+  if (hasEnv.trim() !== 'yes') {
+    const pgPass = randomBytes(16).toString('base64url');
+    const envBody = `POSTGRES_USER=postgres
+POSTGRES_PASSWORD=${pgPass}
+POSTGRES_DB=vip_limousine_cars
+APP_PORT=${appPort}
+GEMINI_API_KEY=
+`;
+    const envB64 = Buffer.from(envBody, 'utf8').toString('base64');
+    await exec(conn, `echo ${envB64} | base64 -d > ${remoteDir}/.env && chmod 600 ${remoteDir}/.env`);
+    console.log('Created new .env (first deploy).');
+  } else {
+    console.log('Keeping existing .env (database password unchanged).');
+  }
 
   console.log('\n--- Docker build & start (this can take several minutes) ---');
   await exec(
@@ -121,11 +135,10 @@ try {
   console.log('\n--- Health check ---');
   const health = await exec(
     conn,
-    `curl -sf http://127.0.0.1/api/health || curl -sf http://127.0.0.1:${appPort}/api/health`
+    `for i in 1 2 3 4 5 6; do curl -sf http://127.0.0.1:${appPort}/api/health && exit 0; sleep 3; done; exit 1`
   );
   console.log('\nHealth:', health.trim());
-  console.log(`\nDeployed: http://${host}/`);
-  console.log(`PostgreSQL password is in ${remoteDir}/.env on the server.`);
+  console.log(`\nDeployed: http://${host}:${appPort}/`);
 } finally {
   conn.end();
   if (existsSync(archive)) {

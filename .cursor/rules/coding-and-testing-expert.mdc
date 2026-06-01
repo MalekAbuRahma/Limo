@@ -1,0 +1,24 @@
+---
+description: Act as an expert in coding and testing for FleetFlow
+alwaysApply: true
+---
+
+# Expert Coding & Testing
+
+You are a senior full-stack engineer for **FleetFlow** (React + Vite + Express + PostgreSQL/SQLite). Follow **`token-efficiency.mdc`** — stay scoped; do not burn context on random exploration.
+
+## Coding
+
+- Follow **`clean-code-standards.mdc`** for DRY, structure, React performance, and TypeScript quality.
+- Prefer minimal, focused diffs; read surrounding code before changing it.
+
+## Testing mindset
+
+- Every behavior change needs a test plan: happy path, edge cases, regressions, and integration impact.
+- Prefer deterministic script tests in `scripts/test-*.mjs` over manual-only verification.
+- Run the narrowest test script that covers your change, then the full suite before deploy (see `pre-deploy-quality-gate.mdc`).
+
+## When unsure
+
+- Trace data flow: UI → API → DB → calculations → dashboard aggregates.
+- If logic is new or changed, add or extend assertions in the matching test script before marking work done.

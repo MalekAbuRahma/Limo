@@ -19,6 +19,7 @@ import {
   deleteVehicleOnApi,
   fetchFleetFromApi,
   fetchVehicleStateFromApi,
+  invalidateApiHealthCache,
   persistVehicleStateToApi,
   type StorageSource,
 } from './taxiApi';
@@ -30,7 +31,7 @@ const vehicleStorageKey = (id: string) => `taxi_vehicle_${id}`;
 
 export interface FleetIndex {
   globalSettings: FleetGlobalSettings;
-  vehicles: Pick<VehicleListItem, 'id' | 'label' | 'vehicleImage'>[];
+  vehicles: Pick<VehicleListItem, 'id' | 'label' | 'vehicleImage' | 'assignedUserId'>[];
 }
 
 function defaultGlobalSettings(): FleetGlobalSettings {
@@ -117,25 +118,7 @@ function migrateLegacySingleCar(index: FleetIndex): FleetIndex {
   return next;
 }
 
-export async function loadFleet(): Promise<{ fleet: FleetData; source: StorageSource }> {
-  let index = migrateLegacySingleCar(loadFleetIndex());
-  const apiUp = await checkApiHealth();
-
-  if (apiUp) {
-    const fromApi = await fetchFleetFromApi();
-    if (fromApi?.vehicles) {
-      saveFleetIndex({
-        globalSettings: fromApi.globalSettings,
-        vehicles: fromApi.vehicles.map((v) => ({
-          id: v.id,
-          label: v.label,
-          vehicleImage: v.vehicleImage,
-        })),
-      });
-      return { fleet: fromApi, source: 'sql' };
-    }
-  }
-
+function buildFleetFromLocalIndex(index: FleetIndex): FleetData {
   const vehicles: VehicleListItem[] = index.vehicles.map((v) => {
     const state = loadVehicleLocal(v.id);
     const entries = state?.entries ?? [];
@@ -155,6 +138,7 @@ export async function loadFleet(): Promise<{ fleet: FleetData; source: StorageSo
       id: v.id,
       label: v.label,
       vehicleImage: v.vehicleImage,
+      assignedUserId: v.assignedUserId ?? null,
       ownerName: state?.settings.ownerName ?? '',
       monthlyGuarantee: guarantee,
       currentDriverName: state?.settings.currentDriverName ?? '',
@@ -173,10 +157,58 @@ export async function loadFleet(): Promise<{ fleet: FleetData; source: StorageSo
     };
   });
 
-  return {
-    fleet: { globalSettings: index.globalSettings, vehicles },
-    source: 'local',
-  };
+  return { globalSettings: index.globalSettings, vehicles };
+}
+
+/** Instant garage from localStorage — no network. */
+export function loadFleetFromLocal(): FleetData | null {
+  const index = migrateLegacySingleCar(loadFleetIndex());
+  if (!index.vehicles.length) return null;
+  return buildFleetFromLocalIndex(index);
+}
+
+export function peekVehicleStateLocal(vehicleId: string): TaxiAppState | null {
+  return loadVehicleLocal(vehicleId);
+}
+
+export async function loadFleet(): Promise<{
+  fleet: FleetData;
+  source: StorageSource;
+  authError?: boolean;
+  apiUnreachable?: boolean;
+}> {
+  const index = migrateLegacySingleCar(loadFleetIndex());
+  const apiUp = await checkApiHealth();
+
+  if (apiUp) {
+    const result = await fetchFleetFromApi();
+    if (result.ok) {
+      saveFleetIndex({
+        globalSettings: result.fleet.globalSettings,
+        vehicles: result.fleet.vehicles.map((v) => ({
+          id: v.id,
+          label: v.label,
+          vehicleImage: v.vehicleImage,
+          assignedUserId: v.assignedUserId ?? null,
+        })),
+      });
+      return { fleet: result.fleet, source: 'sql' };
+    }
+    if (result.unauthorized) {
+      return {
+        fleet: buildFleetFromLocalIndex(index),
+        source: 'local',
+        authError: true,
+      };
+    }
+    return {
+      fleet: buildFleetFromLocalIndex(index),
+      source: 'local',
+      apiUnreachable: true,
+    };
+  }
+
+  return { fleet: buildFleetFromLocalIndex(index), source: 'local' };
 }
 
 export async function loadVehicleState(
@@ -224,6 +256,7 @@ export function scheduleSaveVehicleState(
       saveVehicleLocal(vehicleId, normalized);
       onResult?.('sql');
     } else {
+      if (apiUp) invalidateApiHealthCache();
       saveVehicleLocal(vehicleId, normalized);
       onResult?.('local');
     }
@@ -244,6 +277,7 @@ export async function flushSaveVehicleState(
     saveVehicleLocal(vehicleId, normalized);
     return 'sql';
   }
+  if (apiUp) invalidateApiHealthCache();
   saveVehicleLocal(vehicleId, normalized);
   return 'local';
 }
@@ -286,11 +320,17 @@ export async function createVehicle(input: VehicleCreateInput): Promise<string> 
       currentDriverName: initialSettings.currentDriverName,
       vehicleCost: initialSettings.vehicleCost,
       vehicleLifeYears: initialSettings.vehicleLifeYears,
+      assignedUserId: input.assignedUserId,
     });
     if (id) {
       saveVehicleLocal(id, empty);
       const index = loadFleetIndex();
-      index.vehicles.push({ id, label, vehicleImage });
+      index.vehicles.push({
+        id,
+        label,
+        vehicleImage,
+        assignedUserId: input.assignedUserId,
+      });
       saveFleetIndex(index);
       return id;
     }
@@ -299,7 +339,12 @@ export async function createVehicle(input: VehicleCreateInput): Promise<string> 
   const id = `v-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   saveVehicleLocal(id, empty);
   const index = loadFleetIndex();
-  index.vehicles.push({ id, label, vehicleImage });
+  index.vehicles.push({
+    id,
+    label,
+    vehicleImage,
+    assignedUserId: input.assignedUserId,
+  });
   saveFleetIndex(index);
   return id;
 }

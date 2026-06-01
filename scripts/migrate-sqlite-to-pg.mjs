@@ -14,11 +14,27 @@ import { getPool } from '../server/pgPool.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sqlitePath = process.env.SQLITE_PATH || path.join(__dirname, '..', 'data', 'taxi.db');
 
+/** Satisfies server validation when legacy SQLite has no image */
+const MIGRATE_PLACEHOLDER_IMAGE =
+  'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MDAiIGhlaWdodD0iMjQwIj48cmVjdCBmaWxsPSIjZGRkIiB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlJSIvPjwvc3ZnPg==';
+
+function withVehicleImage(image) {
+  const s = String(image ?? '').trim();
+  return s || MIGRATE_PLACEHOLDER_IMAGE;
+}
+
 function sqlRows(db, sql) {
   const res = db.exec(sql);
   if (!res.length) return [];
   const { columns, values } = res[0];
   return values.map((row) => Object.fromEntries(columns.map((c, i) => [c, row[i]])));
+}
+
+function tableExists(db, name) {
+  const res = db.exec(
+    `SELECT 1 FROM sqlite_master WHERE type='table' AND name='${name.replace(/'/g, "''")}'`
+  );
+  return res.length > 0 && res[0].values.length > 0;
 }
 
 function mapEntry(row) {
@@ -95,7 +111,9 @@ async function main() {
   await initDb();
   const pool = getPool();
 
-  const vehicles = sqlRows(sqlite, `SELECT * FROM vehicles ORDER BY sort_order, created_at`);
+  const vehicles = tableExists(sqlite, 'vehicles')
+    ? sqlRows(sqlite, `SELECT * FROM vehicles ORDER BY sort_order, created_at`)
+    : [];
   if (vehicles.length === 0) {
     console.log('No vehicles table in SQLite — trying legacy app_settings...');
     const settings = sqlRows(sqlite, `SELECT * FROM app_settings WHERE id = 1`)[0];
@@ -109,7 +127,7 @@ async function main() {
       [
         vid,
         settings?.vehicle_label ?? 'VIP limousine CARS',
-        settings?.vehicle_image ?? '',
+        withVehicleImage(settings?.vehicle_image),
         settings?.monthly_guarantee ?? 750,
         settings?.current_driver_name ?? '',
         settings?.vehicle_cost ?? 33000,
@@ -122,7 +140,7 @@ async function main() {
         monthlyGuarantee: settings?.monthly_guarantee ?? 750,
         currentDriverName: settings?.current_driver_name ?? '',
         vehicleLabel: settings?.vehicle_label ?? 'VIP limousine CARS',
-        vehicleImage: settings?.vehicle_image ?? '',
+        vehicleImage: withVehicleImage(settings?.vehicle_image),
         vehicleCost: settings?.vehicle_cost ?? 33000,
         vehicleLifeYears: settings?.vehicle_life_years ?? 7,
         fontSize: settings?.font_size ?? 'normal',
@@ -135,7 +153,9 @@ async function main() {
       entries: sqlRows(sqlite, `SELECT * FROM monthly_entries ORDER BY date`).map(mapEntry),
       accidents: sqlRows(sqlite, `SELECT * FROM accidents ORDER BY accident_date`).map(mapAccident),
       licenses: sqlRows(sqlite, `SELECT * FROM annual_licenses ORDER BY license_date`).map(mapLicense),
-      oilChanges: sqlRows(sqlite, `SELECT * FROM oil_changes ORDER BY change_date`).map(mapOil),
+      oilChanges: tableExists(sqlite, 'oil_changes')
+        ? sqlRows(sqlite, `SELECT * FROM oil_changes ORDER BY change_date`).map(mapOil)
+        : [],
     });
     console.log('Migrated legacy single-vehicle data.');
   } else {
@@ -167,7 +187,7 @@ async function main() {
         [
           vid,
           v.label,
-          v.vehicle_image ?? '',
+          withVehicleImage(v.vehicle_image),
           v.monthly_guarantee ?? 750,
           v.current_driver_name ?? '',
           v.vehicle_cost ?? 33000,
@@ -183,7 +203,7 @@ async function main() {
           monthlyGuarantee: v.monthly_guarantee ?? 750,
           currentDriverName: v.current_driver_name ?? '',
           vehicleLabel: v.label ?? '',
-          vehicleImage: v.vehicle_image ?? '',
+          vehicleImage: withVehicleImage(v.vehicle_image),
           vehicleCost: v.vehicle_cost ?? 33000,
           vehicleLifeYears: v.vehicle_life_years ?? 7,
           insuranceReceivedTotal: v.insurance_received_total ?? 0,

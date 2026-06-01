@@ -1,0 +1,81 @@
+---
+description: Smart token use — scoped work, minimal context, no wasteful exploration
+alwaysApply: true
+---
+
+# Token Efficiency (Smart Context)
+
+Protect the user's Cursor quota. **Do more with less context** — never "explore everything just in case."
+
+## Before any tool use
+
+1. **Parse the request**: one sentence — what file(s) or feature, and what outcome?
+2. **Smallest path**: can this be answered from one file, one grep, or conversation history?
+3. **Stop when done**: do not keep searching after you have enough to act.
+
+## Tool priority (cheap → expensive)
+
+| Need | Use | Avoid |
+|------|-----|--------|
+| Find symbol / string | `Grep` with path + glob | Reading whole directories |
+| Find file by name | `Glob` with tight pattern | `**/*` workspace-wide scan |
+| Understand one function | `Grep` + `Read` with `offset`/`limit` | Full file read of 500+ line files |
+| Architecture overview | `SemanticSearch` once, narrow `target_directories` | Multiple overlapping searches |
+| Big unknown area | Ask user to narrow scope | Task/explore subagent by default |
+
+## Never load into context (unless user explicitly asks)
+
+- `node_modules/`, `deploy/node_modules/`, `dist/`, `package-lock.json`
+- `data/*.db`, images, archives, `.env`, credentials
+- Entire `TaxiTrackerApp.tsx` — grep the symbol, then read **only** the relevant line range
+
+## File read rules
+
+- **Default**: read ≤150 lines around the change; expand only if blocked.
+- **Reuse context**: do not re-read files already shown in this chat or open in the editor.
+- **One read per path** per task unless the file changed after your edit.
+- Prefer **editing from grep hits** over "read file top to bottom."
+
+## Implementation discipline
+
+- **Minimal diff** — fix the bug, don't refactor unrelated code (saves tokens + review time).
+- **No drive-by**: skip formatting whole files, renaming unrelated symbols, or "while we're here" cleanups.
+- **No duplicate explanations** in chat — short answer; link to code with `startLine:endLine:path` citations, not full file dumps.
+- **Tests**: run only scripts that match the change (`test:calc`, etc.); run `test:all` only for deploy, release, or user-requested full verify.
+
+## When to ask the user first (saves tokens)
+
+- Request is vague ("make it better", "check everything", "audit security")
+- Would require reading **>5 files** or **>800 lines** total
+- Full-repo refactor, migration, or new test suite from scratch
+- Multiple valid approaches with big trade-offs
+
+Offer **2–3 concrete options** in one short message instead of exploring all paths.
+
+## Subagents & parallel tools
+
+- **Do not** spawn Task/explore subagents unless the user asked, or the task truly spans many unrelated modules.
+- Batch parallel reads only when paths are **already known** — not "read 10 files hoping one helps."
+- Max **one** broad semantic search per user message unless the first result was empty.
+
+## Response length
+
+- Simple fix → brief summary + what changed (3–6 lines).
+- Multi-file change → bullet list of files + behavior change; skip repeating the user's question.
+- No ASCII art, no long preambles, no restating all project rules in every reply.
+
+## FleetFlow hot spots (read surgically)
+
+| Area | Approach |
+|------|----------|
+| `components/TaxiTrackerApp.tsx` | Grep tab/handler name → read that section only |
+| `utils/taxiCalculations.ts` | Often enough alone for finance bugs |
+| `server/index.js` | Grep route path → read handler block |
+| Deploy | `deploy/DEPLOY.md` + one script, not all of `deploy/node_modules` |
+
+## Self-check before ending turn
+
+- [ ] Did I avoid redundant reads/searches?
+- [ ] Is the diff the smallest correct fix?
+- [ ] Did I skip `test:all` unless required?
+- [ ] Is my reply shorter than the code I changed?

@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useState } from 'react';
+import AppModal, { AppModalBody, AppModalFooter, AppModalHeader } from './AppModal';
 import type { OilChangeRecord } from '../taxiTypes';
 import {
   OIL_DEFAULT_DISTANCE_KM,
@@ -184,19 +185,16 @@ const OilChangeDialog: React.FC<OilChangeDialogProps> = ({
   const isEntry = mode === 'entry';
 
   return (
-    <div
-      className="fixed inset-0 z-[110] flex items-center justify-center bg-black/45 p-4"
-      role="dialog"
-      aria-modal="true"
+    <AppModal
+      open={open}
+      onClose={onCancel}
+      size="lg"
+      zIndex={110}
+      panelClassName="border border-slate-200"
       aria-labelledby={titleId}
-      onClick={onCancel}
     >
-      <form
-        className="bg-white rounded-2xl shadow-xl max-w-lg w-full border border-slate-200 text-right overflow-hidden max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={handleSubmit}
-      >
-        <div className="px-6 pt-6 pb-4 border-b border-slate-100 bg-orange-50">
+      <form className="flex flex-col min-h-0 overflow-hidden" onSubmit={handleSubmit}>
+        <AppModalHeader variant="warning" className="!bg-orange-50 !border-orange-100">
           <h2 id={titleId} className="text-lg font-bold text-orange-900">
             {isEntry ? 'تغيير زيت — بيانات العداد' : existing ? 'تعديل سجل الزيت' : 'تسجيل تغيير زيت'}
           </h2>
@@ -205,9 +203,9 @@ const OilChangeDialog: React.FC<OilChangeDialogProps> = ({
             والأرباح والملخص
             {driverName ? ` (${driverName})` : ''}.
           </p>
-        </div>
+        </AppModalHeader>
 
-        <div className="px-6 py-5 space-y-4">
+        <AppModalBody className="space-y-4">
           {mode === 'standalone' && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <label className="block">
@@ -374,25 +372,27 @@ const OilChangeDialog: React.FC<OilChangeDialogProps> = ({
               {previewAlert}
             </div>
           )}
-        </div>
+        </AppModalBody>
 
-        <div className="px-6 pb-6 flex flex-col-reverse sm:flex-row gap-2 sm:justify-end border-t border-slate-100 pt-4">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-5 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50"
-          >
-            إلغاء
-          </button>
-          <button
-            type="submit"
-            className="px-5 py-2.5 bg-orange-600 text-white rounded-lg font-medium hover:bg-orange-700"
-          >
-            حفظ السجل
-          </button>
-        </div>
+        <AppModalFooter>
+          <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end pt-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-5 py-2.5 border border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50"
+            >
+              إلغاء
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2.5 bg-orange-600 text-white rounded-lg font-medium hover:bg-orange-700"
+            >
+              حفظ السجل
+            </button>
+          </div>
+        </AppModalFooter>
       </form>
-    </div>
+    </AppModal>
   );
 };
 

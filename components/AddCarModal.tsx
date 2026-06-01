@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Car } from '../types';
 import { translations, Language } from '../translations';
+import AppModal, { AppModalBody, AppModalFooter, AppModalHeader } from './AppModal';
 
 interface AddCarModalProps {
   lang: Language;
@@ -63,22 +64,30 @@ const AddCarModal: React.FC<AddCarModalProps> = ({ lang, onSave, onClose }) => {
   const showError = (name: string) => error && touched[name];
 
   return (
-    <div className="fixed inset-0 z-[200] bg-slate-900/60 flex items-center justify-center p-4 overflow-y-auto" dir={isRtl ? 'rtl' : 'ltr'}>
-      <div className="bg-white rounded-lg w-full max-w-lg shadow-xl border border-slate-200 my-8">
-        <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200">
-          <h2 className="text-lg font-semibold text-slate-900">{t.addVehicle}</h2>
-          <button type="button" onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" aria-label={t.close}>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-
-        {error && (
-          <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm font-medium" role="alert">
-            {error}
+    <AppModal open onClose={onClose} size="lg" zIndex={200} dir={isRtl ? 'rtl' : 'ltr'}>
+      <form className="flex flex-col min-h-0 overflow-hidden" onSubmit={handleSubmit}>
+        <AppModalHeader>
+          <div className="flex justify-between items-center gap-3">
+            <h2 className="text-lg font-semibold text-slate-900">{t.addVehicle}</h2>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              aria-label={t.close}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
-        )}
+        </AppModalHeader>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+        <AppModalBody className="space-y-6">
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm font-medium" role="alert">
+              {error}
+            </div>
+          )}
           <div className="space-y-4">
             <div>
               <label htmlFor="add-car-model" className={labelBase}>{t.carModel}</label>
@@ -170,17 +179,27 @@ const AddCarModal: React.FC<AddCarModalProps> = ({ lang, onSave, onClose }) => {
             </div>
           </div>
 
-          <div className={`flex gap-3 pt-2 ${isRtl ? 'flex-row-reverse' : ''}`}>
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 px-4 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors">
+        </AppModalBody>
+
+        <AppModalFooter>
+          <div className={`flex gap-3 pt-3 ${isRtl ? 'flex-row-reverse' : ''}`}>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2.5 px-4 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors"
+            >
               {t.cancel}
             </button>
-            <button type="submit" className="flex-1 py-2.5 px-4 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-slate-700 border border-slate-700 transition-colors">
+            <button
+              type="submit"
+              className="flex-1 py-2.5 px-4 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-slate-700 border border-slate-700 transition-colors"
+            >
               {t.addVehicle}
             </button>
           </div>
-        </form>
-      </div>
-    </div>
+        </AppModalFooter>
+      </form>
+    </AppModal>
   );
 };
 

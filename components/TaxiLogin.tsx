@@ -1,5 +1,13 @@
 import React, { useState } from 'react';
-import { createSession, saveSession, validateLogin, type UserSession } from '../utils/taxiAuth';
+import { loginViaApi } from '../utils/authApi';
+import { checkApiHealth } from '../utils/taxiApi';
+import {
+  createOfflineSession,
+  saveSession,
+  sessionFromApiUser,
+  validateOfflineLogin,
+  type UserSession,
+} from '../utils/taxiAuth';
 
 export type UiLanguage = 'ar' | 'en';
 
@@ -10,11 +18,13 @@ const copy = {
     username: 'اسم المستخدم',
     password: 'كلمة المرور',
     submit: 'دخول',
-    demo: 'دخول سريع (تجريبي)',
-    restricted: 'للاستخدام الشخصي — البيانات على جهازك',
+    offline: 'وضع بدون خادم (محلي فقط)',
+    restricted: 'البيانات محفوظة على الخادم — يتطلب حساباً صالحاً',
     error: 'تحقق من اسم المستخدم وكلمة المرور',
+    staleApi:
+      'خادم API قديم — أوقف التطبيق (STOP-VIP-limousine-CARS.bat) ثم شغّله من جديد (START-VIP-limousine-CARS.bat)',
     lang: 'اللغة',
-    theme: 'الوضع',
+    hint: 'المدير: admin / 1234 — أو admin / admin بعد أول إعداد',
   },
   en: {
     title: 'VIP limousine CARS',
@@ -22,11 +32,13 @@ const copy = {
     username: 'Username',
     password: 'Password',
     submit: 'Sign in',
-    demo: 'Quick demo access',
-    restricted: 'Personal use — data stays on your device',
+    offline: 'Offline mode (local only)',
+    restricted: 'Data is stored on the server — valid account required',
     error: 'Invalid username or password',
+    staleApi:
+      'API server is outdated — run STOP-VIP-limousine-CARS.bat then START-VIP-limousine-CARS.bat',
     lang: 'Language',
-    theme: 'Theme',
+    hint: 'Admin: admin / 1234 — or admin / admin after first setup',
   },
 } as const;
 
@@ -40,23 +52,58 @@ const TaxiLogin: React.FC<TaxiLoginProps> = ({ onLogin, lang, setLang }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [busy, setBusy] = useState(false);
   const t = copy[lang];
   const isRtl = lang === 'ar';
 
-  const completeLogin = (name: string) => {
-    const session = createSession(name);
+  const finish = (session: UserSession) => {
     saveSession(session);
     onLogin(session);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(false);
-    if (!validateLogin(username, password)) {
+    setErrorMessage('');
+    setBusy(true);
+
+    const apiUp = await checkApiHealth(true);
+
+    if (apiUp) {
+      const result = await loginViaApi(username, password);
+      if (result.ok) {
+        finish(sessionFromApiUser(result.user, result.token));
+        setBusy(false);
+        return;
+      }
+      setError(true);
+      setErrorMessage(result.reason === 'not_found' ? t.staleApi : t.error);
+      setBusy(false);
+      return;
+    }
+
+    const role = validateOfflineLogin(username, password);
+    if (!role) {
+      setError(true);
+      setBusy(false);
+      return;
+    }
+    finish(createOfflineSession(username, role));
+    setBusy(false);
+  };
+
+  const handleOffline = () => {
+    const role = validateOfflineLogin(username || 'user', password || 'offline');
+    if (!role && !username.trim()) {
+      finish(createOfflineSession('مستخدم', 'user'));
+      return;
+    }
+    if (!role) {
       setError(true);
       return;
     }
-    completeLogin(username);
+    finish(createOfflineSession(username || 'مستخدم', role));
   };
 
   return (
@@ -64,9 +111,7 @@ const TaxiLogin: React.FC<TaxiLoginProps> = ({ onLogin, lang, setLang }) => {
       className="min-h-screen flex items-center justify-center bg-slate-100 px-4 py-12"
       dir={isRtl ? 'rtl' : 'ltr'}
     >
-      <div
-        className={`absolute top-6 z-10 flex gap-2 ${isRtl ? 'left-6' : 'right-6'}`}
-      >
+      <div className={`absolute top-6 z-10 flex gap-2 ${isRtl ? 'left-6' : 'right-6'}`}>
         <button
           type="button"
           onClick={() => setLang('en')}
@@ -118,7 +163,7 @@ const TaxiLogin: React.FC<TaxiLoginProps> = ({ onLogin, lang, setLang }) => {
                 className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm font-medium"
                 role="alert"
               >
-                {t.error}
+                {errorMessage || t.error}
               </div>
             )}
             <label className="block">
@@ -128,8 +173,9 @@ const TaxiLogin: React.FC<TaxiLoginProps> = ({ onLogin, lang, setLang }) => {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
+                required
                 className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:ring-2 focus:ring-green-500/30 focus:border-green-600 outline-none"
-                placeholder={lang === 'ar' ? 'مثال: malek' : 'e.g. malek'}
+                placeholder={lang === 'ar' ? 'admin' : 'admin'}
               />
             </label>
             <label className="block">
@@ -139,6 +185,7 @@ const TaxiLogin: React.FC<TaxiLoginProps> = ({ onLogin, lang, setLang }) => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
+                required
                 className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:ring-2 focus:ring-green-500/30 focus:border-green-600 outline-none"
                 placeholder="••••••••"
               />
@@ -146,25 +193,25 @@ const TaxiLogin: React.FC<TaxiLoginProps> = ({ onLogin, lang, setLang }) => {
             <div className="pt-2 space-y-2">
               <button
                 type="submit"
-                className="w-full py-2.5 bg-green-600 text-white rounded-xl text-sm font-semibold hover:bg-green-700 shadow-sm"
+                disabled={busy}
+                className="w-full py-2.5 bg-green-600 text-white rounded-xl text-sm font-semibold hover:bg-green-700 shadow-sm disabled:opacity-60"
               >
-                {t.submit}
+                {busy ? (lang === 'ar' ? 'جاري الدخول...' : 'Signing in...') : t.submit}
               </button>
               <button
                 type="button"
-                onClick={() => completeLogin(username.trim() || 'مستخدم')}
-                className="w-full py-2 text-slate-500 text-xs font-medium hover:text-slate-700"
+                onClick={handleOffline}
+                disabled={busy}
+                className="w-full py-2 text-slate-500 text-xs font-medium hover:text-slate-700 disabled:opacity-60"
               >
-                {t.demo}
+                {t.offline}
               </button>
             </div>
           </form>
 
           <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 text-center">
             <p className="text-xs text-slate-400">{t.restricted}</p>
-            <p className="text-[10px] text-slate-400 mt-1 tabular-nums">
-              demo: malek / 1234
-            </p>
+            <p className="text-[10px] text-slate-400 mt-1">{t.hint}</p>
           </div>
         </div>
       </div>

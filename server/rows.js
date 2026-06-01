@@ -30,6 +30,9 @@ export function rowToVehicleMeta(row) {
     insuranceReceivedTotal: Number(row.insurance_received_total ?? 0),
     sortOrder: Number(row.sort_order ?? 0),
     createdAt: row.created_at || '',
+    assignedUserId: row.assigned_user_id || null,
+    assignedUserDisplayName: row.assigned_user_display_name || null,
+    assignedUsername: row.assigned_username || null,
   };
 }
 

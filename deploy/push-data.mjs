@@ -26,7 +26,7 @@ if (!existsSync(sqlitePath)) {
   process.exit(1);
 }
 
-function exec(conn, cmd, timeoutMs = 600000) {
+function exec(conn, cmd, timeoutMs = 600000, { quiet = false } = {}) {
   return new Promise((resolve, reject) => {
     conn.exec(cmd, { pty: false }, (err, stream) => {
       if (err) return reject(err);
@@ -45,12 +45,12 @@ function exec(conn, cmd, timeoutMs = 600000) {
         .on('data', (d) => {
           const s = d.toString();
           out += s;
-          process.stdout.write(s);
+          if (!quiet) process.stdout.write(s);
         })
         .stderr.on('data', (d) => {
           const s = d.toString();
           errOut += s;
-          process.stderr.write(s);
+          if (!quiet) process.stderr.write(s);
         });
     });
   });
@@ -85,8 +85,13 @@ conn
       console.log(`Uploading ${sqlitePath} ...`);
       await exec(conn, `mkdir -p ${remoteDir}/data`);
       await upload(conn, sqlitePath, `${remoteDir}/data/taxi.db`);
+      await upload(
+        conn,
+        join(projectRoot, 'scripts', 'migrate-sqlite-to-pg.mjs'),
+        `${remoteDir}/scripts/migrate-sqlite-to-pg.mjs`
+      );
 
-      const envText = await exec(conn, `cat ${remoteDir}/.env`);
+      const envText = await exec(conn, `cat ${remoteDir}/.env`, 30000, { quiet: true });
       const env = parseEnv(envText);
       const pgUser = env.POSTGRES_USER || 'postgres';
       const pgPass = env.POSTGRES_PASSWORD;
@@ -99,27 +104,23 @@ conn
       console.log('\nMigrating SQLite → PostgreSQL on server (npm ci + migrate)...\n');
       await exec(
         conn,
-        `cd ${remoteDir} && ` +
-          `echo ${dbUrlB64} | base64 -d > /tmp/fleetflow-dburl.txt && ` +
-          `docker run --rm --network fleetflow_net ` +
-          `-v ${remoteDir}:/app -w /app ` +
-          `--env-file /tmp/fleetflow-dburl.env 2>/dev/null; ` +
-          `printf 'DATABASE_URL=%s\\nSQLITE_PATH=/app/data/taxi.db\\n' "$(cat /tmp/fleetflow-dburl.txt)" > /tmp/fleetflow-migrate.env && ` +
-          `docker run --rm --network fleetflow_net ` +
-          `-v ${remoteDir}:/app -w /app ` +
-          `--env-file /tmp/fleetflow-migrate.env ` +
-          `node:22-alpine sh -c "npm ci && npx tsx scripts/migrate-sqlite-to-pg.mjs" && ` +
-          `rm -f /tmp/fleetflow-dburl.txt /tmp/fleetflow-migrate.env`,
+        [
+          `cd ${remoteDir}`,
+          `echo ${dbUrlB64} | base64 -d > /tmp/fleetflow-dburl.raw`,
+          `{ printf 'DATABASE_URL='; cat /tmp/fleetflow-dburl.raw; printf '\\nSQLITE_PATH=/app/data/taxi.db\\n'; } > /tmp/fleetflow-migrate.env`,
+          `docker run --rm --network fleetflow_net -v ${remoteDir}:/app -w /app --env-file /tmp/fleetflow-migrate.env node:22-alpine sh -c "npm ci && npx tsx scripts/migrate-sqlite-to-pg.mjs"`,
+          `rm -f /tmp/fleetflow-dburl.raw /tmp/fleetflow-migrate.env`,
+        ].join(' && '),
         900000
       );
 
       const appPort = env.APP_PORT || '8080';
       console.log('\n--- Verify ---');
-      const health = await exec(
+      const fleet = await exec(
         conn,
-        `curl -sf http://127.0.0.1:${appPort}/api/fleet`
+        `curl -s http://127.0.0.1:${appPort}/api/fleet | head -c 600`
       );
-      console.log(health.slice(0, 500));
+      console.log(fleet);
       console.log(`\nData live at http://${host}:${appPort}/`);
     } finally {
       conn.end();

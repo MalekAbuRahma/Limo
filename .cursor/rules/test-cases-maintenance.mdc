@@ -1,0 +1,42 @@
+---
+description: Keep full test cases up to date for every feature and detail
+globs: fleetflow---car-rental-&-finance-dashboard/**/*
+alwaysApply: false
+---
+
+# Test Cases — Create & Maintain
+
+## Test layout (this project)
+
+| Area | Script | Command |
+|------|--------|---------|
+| Calculations, ROI, payments, expenses | `scripts/test-calculations.mjs` | `npm run test:calc` |
+| Sample / seed data integrity | `scripts/test-sample-data.mjs` | `npm run test:sample` |
+| Filters & pagination | `scripts/test-entry-filters.mjs` | `npm run test:filters` |
+| End-to-end flows | `scripts/test-integration.mjs` | `npm run test:integration` |
+| Fleet / multi-car | `scripts/test-fleet.mjs` | (via `test:all`) |
+| Oil change tracking | `scripts/test-oil-change.mjs` | (via `test:all`) |
+| **Full suite + build** | `scripts/test-all.mjs` | `npm run test:all` |
+
+Work from app root: `fleetflow---car-rental-&-finance-dashboard/`.
+
+## Required on every feature or fix
+
+1. **Identify** affected modules (`utils/`, `server/`, components, deploy scripts).
+2. **Add or update** tests in the best-matching `scripts/test-*.mjs` using the existing `assert(cond, msg)` pattern.
+3. **Cover at minimum**: expected output, boundary values (0, empty, null), invalid input handling, and one regression case for the bug you fixed.
+4. **New domain** (e.g. new module): add `scripts/test-<feature>.mjs` and register it in `scripts/test-all.mjs` `steps` array.
+5. **Run** the relevant single script, then `npm run test:all` before considering the task complete.
+
+## Examples of what to test
+
+- **Calculations**: month keys, payment status, expense sums, dashboard aggregates, accident/license merges.
+- **API/server**: auth, CRUD, validation errors, DB constraints.
+- **UI logic**: filters, pagination, sorting — via integration script when behavior crosses layers.
+- **Deploy/migrations**: data shape after migrate; document manual checks only if automation is impossible.
+
+## Do not
+
+- Ship feature-only code without corresponding test updates.
+- Remove or weaken assertions to make tests pass — fix the root cause.
+- Skip updating `test-all.mjs` when adding a new test file.

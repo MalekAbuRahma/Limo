@@ -1,0 +1,71 @@
+---
+description: Deploy-specific checks before pushing to VPS or production
+globs: fleetflow---car-rental-&-finance-dashboard/deploy/**/*
+alwaysApply: false
+---
+
+# Deploy Quality Gate (FleetFlow)
+
+Applies when editing `deploy/` or running deploy commands. See also `pre-deploy-quality-gate.mdc` and `deploy/DEPLOY.md`.
+
+## Hard blocker — run first
+
+From `fleetflow---car-rental-&-finance-dashboard/`:
+
+```bash
+npm run test:all
+```
+
+Do not run remote deploy, `db:push`, or `users:push` until this exits `0`.
+
+## Deploy scripts (project root)
+
+| Command | Script | When |
+|---------|--------|------|
+| Remote full deploy | `node deploy/deploy-remote.mjs` | Code release to VPS |
+| Rebuild on server | `node deploy/rebuild-app.mjs` | App-only rebuild |
+| Sync users | `npm run users:push` | After auth/user env changes |
+| Sync SQLite → PG | `npm run db:push` | After local data changes |
+| PowerShell | `deploy/deploy-to-server.ps1` | Windows alternative to `deploy-remote.mjs` |
+
+Requires `DEPLOY_SSH_PASSWORD` (or SSH keys). Credentials and SSH details: **`server-deployment.mdc`** (gitignored). Never commit `.env.deploy`, passwords, or `data/taxi.db`.
+
+## Pre-deploy checklist
+
+### Must do
+
+- [ ] `npm run test:all` — calculations, filters, integration, fleet, oil-change, **vite build**
+- [ ] Backup `data/taxi.db` before `db:push` or schema migrations
+- [ ] If schema changed: run `npm run db:init` / `db:migrate` locally and verify integration tests
+- [ ] Confirm `.env` / server `.env` has correct `POSTGRES_PASSWORD`, `API_PORT`, `VITE_API_URL`
+- [ ] `npm run stop` (or stop Docker app) before deploy; restart after
+
+### After deploy — verify on server
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+curl -s http://127.0.0.1/api/health
+```
+
+- [ ] Login works (`admin`, configured users)
+- [ ] Garage → add car → tracking → refresh → data persists
+- [ ] No secrets in git diff (`.env`, `.env.deploy`, DB files)
+
+### Data push caution
+
+- `db:push` **overwrites/migrates** production from local `data/taxi.db` — confirm backup and intent
+- `users:push` syncs from `ENSURE_ADMIN` / `ENSURE_USERS` — rotate default passwords in production
+
+## Security
+
+- Change default demo passwords before public exposure
+- Prefer SSH keys over root password; do not paste credentials into chat or commits
+- Rotate credentials if leaked; see `deploy/DEPLOY.md` Security section
+
+## Agent workflow
+
+```
+npm run test:all → backup DB → deploy-remote (or ps1) → health check → smoke test UI
+```
+
+If deploy script changes: document in `deploy/DEPLOY.md` and add integration coverage in `scripts/test-integration.mjs` when behavior is testable locally.

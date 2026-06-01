@@ -1,9 +1,29 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import ProfileMenu from './ProfileMenu';
+import UsersAdminPanel from './UsersAdminPanel';
+import VehicleAssignmentSettings from './VehicleAssignmentSettings';
+import DeletionApprovalsPanel, { DeletionApprovalsButton } from './DeletionApprovalsPanel';
+import HomeSettingsTab from './HomeSettingsTab';
+import { DisplayPreferencesPanel, SettingsSection } from './SettingsUi';
 import MonthlyEntryConfirmModal from './MonthlyEntryConfirmModal';
 import type { UiLanguage } from './TaxiLogin';
 import type { UserSession } from '../utils/taxiAuth';
+import {
+  canClearAllEntries,
+  canDeleteVehicle,
+  canImportBackup,
+  canManageUsers,
+  canReassignVehicle,
+  canReviewDeletions,
+  isAdmin,
+  vehicleVisibleToUser,
+} from '../utils/permissions';
+import { gateDeletion } from '../utils/deletionGate';
+import {
+  fetchPendingDeletionCount,
+  type DeletionRequestRecord,
+} from '../utils/deletionRequestsApi';
 import {
   BarChart,
   Bar,
@@ -39,19 +59,25 @@ import {
 import { emptyAppState } from '../utils/taxiPersistence';
 import {
   loadFleet,
+  loadFleetFromLocal,
   loadVehicleState,
+  peekVehicleStateLocal,
   scheduleSaveVehicleState,
   flushSaveVehicleState,
   createVehicle,
   removeVehicle,
   updateFleetIndexVehicleMeta,
+  saveFleetGlobalSettings,
   type StorageSource,
 } from '../utils/taxiFleetPersistence';
+import AppModal, { AppModalBody, AppModalFooter, AppModalHeader } from './AppModal';
 import VehicleGarage from './VehicleGarage';
 import OilChangeDialog from './OilChangeDialog';
 import OilMaintenanceTab from './OilMaintenanceTab';
 import ConfirmDialog from './ConfirmDialog';
+import AppToast, { type AppToastTone } from './AppToast';
 import type { FleetData, FleetGlobalSettings, VehicleCreateInput } from '../taxiTypes';
+import { appDir, loadingCopy } from '../utils/uiCopy';
 import { getOilChangeAlert, sortOilChangesNewestFirst } from '../utils/taxiOilChange';
 import { exportTaxiToExcel, exportTaxiToPdf } from '../utils/taxiExport';
 import {
@@ -85,6 +111,7 @@ import {
 } from '../utils/vehicleImage';
 import {
   TRACKING_PAGE_SIZE,
+  LIST_TABLE_PAGE_SIZE,
   EMPTY_ENTRY_FILTERS,
   EntryFilters,
   filterEntries,
@@ -99,6 +126,7 @@ import {
   type TrackingViewMode,
   type EntrySortOrder,
 } from '../utils/taxiEntryFilters';
+import { useFitPageSize } from '../utils/useFitPageSize';
 import {
   computeDashboard,
   computeEntry,
@@ -123,6 +151,7 @@ import {
 } from '../utils/taxiDriverPayments';
 
 type Tab = 'tracking' | 'dashboard' | 'insurance' | 'licenses' | 'oil' | 'settings';
+type HomeTab = 'fleet' | 'settings';
 
 const emptyForm = (defaultAmount = 750): Omit<MonthlyEntry, 'id'> => ({
   date: new Date().toISOString().slice(0, 7) + '-01',
@@ -143,11 +172,8 @@ const fmtInt = formatInteger;
 const VehicleHeaderBrand: React.FC<{
   vehicleLabel: string;
   ownerName?: string;
-  vehicleImage?: string;
-  onImageChange: (image: string | undefined) => void;
   onLabelChange: (label: string) => void;
-}> = ({ vehicleLabel, ownerName, vehicleImage, onImageChange, onLabelChange }) => {
-  const fileRef = useRef<HTMLInputElement>(null);
+}> = ({ vehicleLabel, ownerName, onLabelChange }) => {
   const labelInputRef = useRef<HTMLInputElement>(null);
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelDraft, setLabelDraft] = useState(vehicleLabel);
@@ -174,48 +200,8 @@ const VehicleHeaderBrand: React.FC<{
     setEditingLabel(true);
   };
 
-  const handleFile = async (file: File | undefined) => {
-    if (!file) return;
-    try {
-      const dataUrl = await fileToVehicleImageDataUrl(file);
-      onImageChange(dataUrl);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'تعذّر رفع الصورة');
-    }
-    if (fileRef.current) fileRef.current.value = '';
-  };
-
   return (
-    <div className="vehicle-header-brand flex items-center gap-3 min-w-0">
-      <div className="vehicle-header-photo-wrap shrink-0">
-        <button
-          type="button"
-          className="vehicle-header-photo-btn"
-          onClick={() => fileRef.current?.click()}
-          title="رفع صورة السيارة"
-          aria-label="رفع أو تغيير صورة السيارة"
-        >
-          {vehicleImage ? (
-            <img src={vehicleImage} alt="" className="vehicle-header-photo" />
-          ) : (
-            <span className="vehicle-header-photo-placeholder" aria-hidden>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M5 17h14l-1.5-5.5a2 2 0 00-1.9-1.4H8.4a2 2 0 00-1.9 1.4L5 17z" />
-                <circle cx="7.5" cy="17.5" r="1.5" />
-                <circle cx="16.5" cy="17.5" r="1.5" />
-                <path d="M5 11h14M8 6h8l1 3" />
-              </svg>
-            </span>
-          )}
-        </button>
-      </div>
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/jpeg,image/png,image/webp,image/gif"
-        className="sr-only"
-        onChange={(e) => void handleFile(e.target.files?.[0])}
-      />
+    <div className="vehicle-header-brand flex items-center gap-2 min-w-0">
       <div className="vehicle-header-title-wrap min-w-0 flex-1">
         {editingLabel ? (
           <input
@@ -234,14 +220,14 @@ const VehicleHeaderBrand: React.FC<{
                 setEditingLabel(false);
               }
             }}
-            className="vehicle-header-title-input w-full text-xl font-bold text-slate-900 border border-blue-300 rounded-lg px-2 py-1 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+            className="vehicle-header-title-input w-full text-base sm:text-lg font-bold text-slate-900 border border-blue-300 rounded-lg px-2 py-0.5 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
             aria-label="اسم السيارة"
             maxLength={120}
           />
         ) : (
           <div className="flex flex-wrap items-center gap-2 min-w-0">
             <h1
-              className="text-xl font-bold text-slate-900 truncate cursor-pointer hover:text-blue-700"
+              className="text-base sm:text-lg font-bold text-slate-900 truncate cursor-pointer hover:text-blue-700 leading-tight"
               onClick={startEditLabel}
               title="انقر لتغيير اسم السيارة"
             >
@@ -273,6 +259,79 @@ const VehicleHeaderBrand: React.FC<{
           </div>
         )}
       </div>
+    </div>
+  );
+};
+
+const VehicleImageSettingsField: React.FC<{
+  vehicleImage?: string;
+  onImageChange: (image: string) => void;
+  lang: UiLanguage;
+}> = ({ vehicleImage, onImageChange, lang }) => {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploadError, setUploadError] = useState('');
+
+  const handleFile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const dataUrl = await fileToVehicleImageDataUrl(file);
+      onImageChange(dataUrl);
+      setUploadError('');
+    } catch (err) {
+      setUploadError(
+        err instanceof Error
+          ? err.message
+          : lang === 'ar'
+            ? 'تعذّر رفع الصورة'
+            : 'Could not upload image'
+      );
+    }
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  return (
+    <div className="vehicle-settings-photo flex flex-wrap items-center gap-3">
+      {vehicleImage ? (
+        <img
+          src={vehicleImage}
+          alt=""
+          className="w-16 h-12 object-cover rounded-lg border border-slate-200"
+        />
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className={`px-3 py-1.5 text-sm border rounded-lg hover:bg-slate-50 ${
+            uploadError ? 'border-red-400 bg-red-50' : 'border-slate-300'
+          }`}
+        >
+          {vehicleImage
+            ? lang === 'ar'
+              ? 'تغيير الصورة'
+              : 'Change image'
+            : lang === 'ar'
+              ? 'رفع صورة السيارة'
+              : 'Upload vehicle photo'}
+        </button>
+      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif"
+        className="sr-only"
+        onChange={(e) => void handleFile(e.target.files?.[0])}
+      />
+      {uploadError && (
+        <p className="w-full text-xs text-red-600" role="alert">
+          {uploadError}
+        </p>
+      )}
+      <p className="w-full text-xs app-text-muted">
+        {lang === 'ar'
+          ? 'تظهر على بطاقة السيارة في صفحة الأسطول فقط — ليست في شريط العنوان أعلاه.'
+          : 'Shown on the garage card only — not in the header bar above.'}
+      </p>
     </div>
   );
 };
@@ -357,6 +416,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [vehicleLoading, setVehicleLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState(false);
   const [tab, setTab] = useState<Tab>('tracking');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -367,20 +427,73 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
   const [successMessage, setSuccessMessage] = useState('تم الحفظ بنجاح و اضافة المبلغ');
   const [isExporting, setIsExporting] = useState(false);
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
+  const [pendingDeletionCount, setPendingDeletionCount] = useState(0);
+  const [homeTab, setHomeTab] = useState<HomeTab>('fleet');
   const [showDisplayPanel, setShowDisplayPanel] = useState(false);
   const [oilDialogOpen, setOilDialogOpen] = useState(false);
   const [standaloneOilEdit, setStandaloneOilEdit] = useState<OilChangeRecord | 'new' | null>(
     null
   );
+  const [toast, setToast] = useState<{ message: string; tone: AppToastTone } | null>(null);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [importBackupConfirm, setImportBackupConfirm] = useState<{
+    file: File;
+    currentCount: number;
+    importedCount: number;
+  } | null>(null);
+  const [entryFormError, setEntryFormError] = useState('');
+  const skipSaveRef = useRef(true);
 
-  const refreshFleet = useCallback(async () => {
-    const { fleet: loaded, source } = await loadFleet();
-    setFleet(loaded);
-    setStorageSource(source);
-    return loaded;
+  const showToast = useCallback((message: string, tone: AppToastTone = 'info') => {
+    setToast({ message, tone });
   }, []);
 
+  const dismissToast = useCallback(() => setToast(null), []);
+
+  const notifyDeletion = useCallback(
+    (message: string, tone: AppToastTone = 'info') => showToast(message, tone),
+    [showToast]
+  );
+
+  const filterFleetForSession = useCallback(
+    (data: FleetData): FleetData => ({
+      ...data,
+      vehicles: data.vehicles.filter((v) => vehicleVisibleToUser(v, session)),
+    }),
+    [session]
+  );
+
+  const refreshFleet = useCallback(async () => {
+    const { fleet: loaded, source, authError: auth, apiUnreachable } = await loadFleet();
+    setAuthError(Boolean(auth));
+    if (auth) {
+      setLoadError(
+        lang === 'ar'
+          ? 'انتهت الجلسة — سجّل الدخول مرة أخرى (admin / كلمة المرور)'
+          : 'Session expired — please sign in again'
+      );
+    } else if (apiUnreachable && !loaded?.vehicles.length) {
+      setLoadError(
+        lang === 'ar'
+          ? 'الخادم يعمل لكن تعذّر تحميل البيانات — تحقق من PostgreSQL و npm run db:init'
+          : 'Server is up but data failed to load — check PostgreSQL and npm run db:init'
+      );
+    } else {
+      setLoadError(null);
+    }
+    const filtered = loaded ? filterFleetForSession(loaded) : loaded;
+    setFleet(filtered);
+    setStorageSource(source);
+    return filtered;
+  }, [filterFleetForSession, lang]);
+
   useEffect(() => {
+    const cached = loadFleetFromLocal();
+    if (cached) {
+      setFleet(filterFleetForSession(cached));
+      setIsLoading(false);
+    }
+
     let cancelled = false;
     void refreshFleet()
       .then(() => {
@@ -389,7 +502,11 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
       })
       .catch(() => {
         if (cancelled) return;
-        setLoadError('تعذّر تحميل الأسطول');
+        if (!cached) {
+          setLoadError(
+            lang === 'ar' ? 'تعذّر تحميل الأسطول' : 'Could not load fleet'
+          );
+        }
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -397,14 +514,52 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [refreshFleet]);
+  }, [refreshFleet, filterFleetForSession]);
+
+  const refreshPendingDeletionCount = useCallback(() => {
+    if (!canReviewDeletions(session)) return;
+    void fetchPendingDeletionCount().then(setPendingDeletionCount);
+  }, [session]);
+
+  useEffect(() => {
+    refreshPendingDeletionCount();
+  }, [refreshPendingDeletionCount]);
+
+  const handleDeletionReviewed = useCallback(
+    async (req: DeletionRequestRecord) => {
+      if (req.requestType === 'vehicle') {
+        const updated = await refreshFleet();
+        if (selectedVehicleId === req.vehicleId) {
+          setSelectedVehicleId(null);
+        }
+        setFleet(updated);
+        return;
+      }
+      if (selectedVehicleId === req.vehicleId) {
+        const { state: fresh } = await loadVehicleState(req.vehicleId);
+        setState(fresh);
+        skipSaveRef.current = true;
+      }
+      await refreshFleet();
+    },
+    [selectedVehicleId, refreshFleet]
+  );
 
   useEffect(() => {
     if (!selectedVehicleId) return;
     let cancelled = false;
-    setVehicleLoading(true);
+    skipSaveRef.current = true;
     setEditingId(null);
     setShowForm(false);
+
+    const cached = peekVehicleStateLocal(selectedVehicleId);
+    if (cached) {
+      setState(cached);
+      setVehicleLoading(false);
+    } else {
+      setVehicleLoading(true);
+    }
+
     void loadVehicleState(selectedVehicleId)
       .then(({ state: loaded, source }) => {
         if (cancelled) return;
@@ -414,19 +569,28 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
       })
       .catch(() => {
         if (cancelled) return;
-        alert('تعذّر تحميل بيانات السيارة');
-        setSelectedVehicleId(null);
+        if (!cached) {
+          showToast(
+            lang === 'ar' ? 'تعذّر تحميل بيانات السيارة' : 'Could not load vehicle data',
+            'error'
+          );
+          setSelectedVehicleId(null);
+        }
       })
       .finally(() => {
-        if (!cancelled) setVehicleLoading(false);
+        if (!cancelled) {
+          setVehicleLoading(false);
+          skipSaveRef.current = false;
+        }
       });
     return () => {
       cancelled = true;
+      skipSaveRef.current = true;
     };
   }, [selectedVehicleId]);
 
   useEffect(() => {
-    if (isLoading || vehicleLoading || !selectedVehicleId) return;
+    if (isLoading || vehicleLoading || !selectedVehicleId || skipSaveRef.current) return;
     scheduleSaveVehicleState(selectedVehicleId, state, setStorageSource);
     updateFleetIndexVehicleMeta(
       selectedVehicleId,
@@ -529,7 +693,14 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
       try {
         await flushSaveVehicleState(selectedVehicleId, state);
       } catch (err) {
-        alert(err instanceof Error ? err.message : 'تعذّر حفظ بيانات السيارة');
+        showToast(
+          err instanceof Error
+            ? err.message
+            : lang === 'ar'
+              ? 'تعذّر حفظ بيانات السيارة'
+              : 'Could not save vehicle data',
+          'error'
+        );
         return;
       }
     }
@@ -545,15 +716,45 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
   };
 
   const handleDeleteVehicle = async (vehicleId: string): Promise<boolean> => {
-    const ok = await removeVehicle(vehicleId);
-    if (!ok) {
-      alert('تعذّر الحذف — يجب بقاء سيارة واحدة على الأقل');
-      return false;
-    }
-    const updated = await refreshFleet();
-    setFleet(updated);
-    return true;
+    const v = fleet?.vehicles.find((x) => x.id === vehicleId);
+    const summary =
+      lang === 'ar'
+        ? `حذف السيارة: ${v?.label ?? vehicleId}`
+        : `Delete vehicle: ${v?.label ?? vehicleId}`;
+
+    let success = false;
+    await gateDeletion(
+      session,
+      lang,
+      {
+        vehicleId,
+        requestType: 'vehicle',
+        targetId: vehicleId,
+        summary,
+        details: { label: v?.label },
+      },
+      async () => {
+        const ok = await removeVehicle(vehicleId);
+        if (!ok) {
+          showToast(
+            lang === 'ar'
+              ? 'تعذّر الحذف — يجب بقاء سيارة واحدة على الأقل'
+              : 'Cannot delete — at least one vehicle must remain',
+            'error'
+          );
+          return;
+        }
+        const updated = await refreshFleet();
+        setFleet(updated);
+        success = true;
+      },
+      notifyDeletion
+    );
+    if (!success && canReviewDeletions(session)) return false;
+    return success || !canReviewDeletions(session);
   };
+
+  const currentVehicleMeta = fleet?.vehicles.find((v) => v.id === selectedVehicleId);
 
   const globalSettings: FleetGlobalSettings =
     fleet?.globalSettings ?? {
@@ -563,6 +764,11 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
       largeButtons: settings.largeButtons,
       comfortableReading: settings.comfortableReading,
     };
+
+  const applyGlobalSettings = useCallback((g: FleetGlobalSettings) => {
+    setFleet((f) => (f ? { ...f, globalSettings: g } : f));
+    saveFleetGlobalSettings(g);
+  }, []);
 
   const handleExportBackup = () => {
     exportBackupJson(state, settings.vehicleLabel || 'taxi');
@@ -574,14 +780,38 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
     entries.length > 0 && backupStatus.isOverdue && !backupBannerDismissed;
 
   const handleImportBackup = async (file: File) => {
+    if (!canImportBackup(session)) {
+      showToast(
+        lang === 'ar'
+          ? 'استيراد النسخة الاحتياطية متاح للمدير فقط'
+          : 'Only administrators can import backups',
+        'error'
+      );
+      return;
+    }
     try {
       const text = await file.text();
       const imported = parseBackupJson(text);
-      const msg =
-        entries.length > 0
-          ? `سيتم استبدال ${entries.length} سجل/سجلات الحالية بالنسخة الاحتياطية (${imported.entries.length} شهر).\n\nمتابعة؟`
-          : `استيراد ${imported.entries.length} سجل/سجلات من النسخة الاحتياطية.\n\nمتابعة؟`;
-      if (!window.confirm(msg)) return;
+      setImportBackupConfirm({
+        file,
+        currentCount: entries.length,
+        importedCount: imported.entries.length,
+      });
+    } catch {
+      showToast(
+        lang === 'ar'
+          ? 'فشل استيراد الملف — تأكد أنه ملف JSON صادر من هذا التطبيق'
+          : 'Import failed — use a JSON backup exported from this app',
+        'error'
+      );
+    }
+  };
+
+  const confirmImportBackup = async () => {
+    if (!importBackupConfirm) return;
+    try {
+      const text = await importBackupConfirm.file.text();
+      const imported = parseBackupJson(text);
       persist({
         settings: { ...settings, ...imported.settings },
         entries: imported.entries,
@@ -590,25 +820,58 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
       });
       setEditingId(null);
       setShowForm(false);
-      alert('تم استيراد النسخة الاحتياطية بنجاح');
+      setImportBackupConfirm(null);
+      showToast(
+        lang === 'ar'
+          ? 'تم استيراد النسخة الاحتياطية بنجاح'
+          : 'Backup imported successfully',
+        'success'
+      );
       setBackupTick((t) => t + 1);
     } catch {
-      alert('فشل استيراد الملف — تأكد أنه ملف JSON صادر من هذا التطبيق');
+      showToast(
+        lang === 'ar'
+          ? 'فشل استيراد الملف — تأكد أنه ملف JSON صادر من هذا التطبيق'
+          : 'Import failed — use a JSON backup exported from this app',
+        'error'
+      );
+      setImportBackupConfirm(null);
     }
   };
 
-  const executeClearAllEntries = () => {
-    persist({ ...state, entries: [] });
-    setEditingId(null);
-    setShowForm(false);
+  const executeClearAllEntries = async () => {
+    if (!selectedVehicleId) return;
+    await gateDeletion(
+      session,
+      lang,
+      {
+        vehicleId: selectedVehicleId,
+        requestType: 'clear_all_entries',
+        summary:
+          lang === 'ar'
+            ? `حذف كل السجلات الشهرية (${entries.length}) — ${settings.vehicleLabel}`
+            : `Clear all monthly entries (${entries.length}) — ${settings.vehicleLabel}`,
+        details: { count: entries.length },
+      },
+      () => {
+        persist({ ...state, entries: [] });
+        setEditingId(null);
+        setShowForm(false);
+        setShowDeleteAllDialog(false);
+        setSuccessMessage(
+          lang === 'ar' ? 'تم حذف كل السجلات الشهرية' : 'All monthly entries deleted'
+        );
+        setShowSuccessDialog(true);
+      },
+      notifyDeletion
+    );
     setShowDeleteAllDialog(false);
-    setSuccessMessage('تم حذف كل السجلات الشهرية');
-    setShowSuccessDialog(true);
   };
 
   const openAdd = () => {
     const today = new Date().toISOString().slice(0, 10);
     setEditingId(null);
+    setEntryFormError('');
     setForm({
       ...emptyForm(guarantee),
       date: today.slice(0, 7) + '-01',
@@ -620,6 +883,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
 
   const openEdit = (entry: MonthlyEntry) => {
     setEditingId(entry.id);
+    setEntryFormError('');
     const computed = computeEntry(entry, guarantee, oilChanges);
     const formDetails = {
       ...normalizeExpenseDetails(entry.expenseDetails, entry.expenses),
@@ -643,6 +907,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
   const handleMonthPickerChange = (ym: string) => {
     if (!ym) return;
     const date = `${ym}-01`;
+    setEntryFormError('');
     setForm((f) => ({ ...f, date, month: formatMonthLabel(date) }));
   };
 
@@ -692,7 +957,11 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
       (x) => x.id !== editingId && monthKey(x.date) === monthKey(entry.date)
     );
     if (duplicate) {
-      alert('يوجد سجل لهذا الشهر مسبقاً. عدّل السجل الحالي أو اختر شهراً آخر.');
+      setEntryFormError(
+        lang === 'ar'
+          ? 'يوجد سجل لهذا الشهر مسبقاً. عدّل السجل الحالي أو اختر شهراً آخر.'
+          : 'An entry for this month already exists. Edit it or choose another month.'
+      );
       return null;
     }
 
@@ -701,6 +970,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
 
   const handleSaveEntry = (e: React.FormEvent) => {
     e.preventDefault();
+    setEntryFormError('');
     const entry = buildEntryFromForm();
     if (!entry) return;
     setPendingEntry(entry);
@@ -721,6 +991,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
     setShowConfirmDialog(false);
     setPendingEntry(null);
     setEditingId(null);
+    setEntryFormError('');
   };
 
   const closeOilDialog = () => {
@@ -750,8 +1021,27 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
     setOilDialogOpen(true);
   };
 
-  const handleDeleteOilRecord = (id: string) => {
-    persist({ ...state, oilChanges: oilChanges.filter((o) => o.id !== id) });
+  const handleDeleteOilRecord = async (id: string) => {
+    if (!selectedVehicleId) return;
+    const rec = oilChanges.find((o) => o.id === id);
+    await gateDeletion(
+      session,
+      lang,
+      {
+        vehicleId: selectedVehicleId,
+        requestType: 'oil_change',
+        targetId: id,
+        summary:
+          lang === 'ar'
+            ? `حذف سجل زيت ${rec?.changeDate ?? ''}`
+            : `Delete oil record ${rec?.changeDate ?? ''}`,
+        details: { changeDate: rec?.changeDate },
+      },
+      () => {
+        persist({ ...state, oilChanges: oilChanges.filter((o) => o.id !== id) });
+      },
+      notifyDeletion
+    );
   };
 
   const handleExportExcel = async () => {
@@ -759,7 +1049,10 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
     try {
       await exportTaxiToExcel(computedEntries, settings, totals, roi);
     } catch {
-      alert('فشل تصدير Excel');
+      showToast(
+        lang === 'ar' ? 'فشل تصدير Excel' : 'Excel export failed',
+        'error'
+      );
     } finally {
       setIsExporting(false);
     }
@@ -768,17 +1061,97 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
   const handleExportPdf = () => {
     try {
       exportTaxiToPdf(computedEntries, settings, totals, roi);
-    } catch {
-      alert('فشل تصدير PDF');
+    } catch (err) {
+      showToast(
+        err instanceof Error && err.message === 'POPUP_BLOCKED'
+          ? lang === 'ar'
+            ? 'يرجى السماح بالنوافذ المنبثقة لتصدير PDF'
+            : 'Allow pop-ups to export PDF'
+          : lang === 'ar'
+            ? 'فشل تصدير PDF'
+            : 'PDF export failed',
+        'error'
+      );
     }
   };
 
-  const handleDeleteEntry = (id: string) => {
-    persist({
-      ...state,
-      entries: entries.filter((x) => x.id !== id),
-      oilChanges: oilChanges.filter((o) => o.entryId !== id),
-    });
+  const handleDeleteEntry = async (id: string) => {
+    if (!selectedVehicleId) return;
+    const entry = entries.find((x) => x.id === id);
+    await gateDeletion(
+      session,
+      lang,
+      {
+        vehicleId: selectedVehicleId,
+        requestType: 'entry',
+        targetId: id,
+        summary:
+          lang === 'ar'
+            ? `حذف سجل شهر ${entry?.month || entry?.date || ''}`
+            : `Delete monthly entry ${entry?.month || entry?.date || ''}`,
+        details: { month: entry?.month, date: entry?.date },
+      },
+      () => {
+        persist({
+          ...state,
+          entries: entries.filter((x) => x.id !== id),
+          oilChanges: oilChanges.filter((o) => o.entryId !== id),
+        });
+      },
+      notifyDeletion
+    );
+  };
+
+  const handleDeleteAccident = async (id: string) => {
+    if (!selectedVehicleId) return;
+    const a = accidents.find((x) => x.id === id);
+    await gateDeletion(
+      session,
+      lang,
+      {
+        vehicleId: selectedVehicleId,
+        requestType: 'accident',
+        targetId: id,
+        summary:
+          lang === 'ar'
+            ? `حذف حادث ${a?.accidentDate ?? ''}`
+            : `Delete accident ${a?.accidentDate ?? ''}`,
+        details: { accidentDate: a?.accidentDate },
+      },
+      () => {
+        persistImmediate((prev) => ({
+          ...prev,
+          accidents: prev.accidents.filter((x) => x.id !== id),
+        }));
+      },
+      notifyDeletion
+    );
+  };
+
+  const handleDeleteLicense = async (id: string) => {
+    if (!selectedVehicleId) return;
+    const l = licenses.find((x) => x.id === id);
+    await gateDeletion(
+      session,
+      lang,
+      {
+        vehicleId: selectedVehicleId,
+        requestType: 'license',
+        targetId: id,
+        summary:
+          lang === 'ar'
+            ? `حذف ترخيص ${l?.licenseYear ?? ''}`
+            : `Delete license ${l?.licenseYear ?? ''}`,
+        details: { licenseYear: l?.licenseYear },
+      },
+      () => {
+        persistImmediate((prev) => ({
+          ...prev,
+          licenses: prev.licenses.filter((x) => x.id !== id),
+        }));
+      },
+      notifyDeletion
+    );
   };
 
   const handleSetPaymentComplete = (id: string, complete: boolean) => {
@@ -809,11 +1182,11 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
   };
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'tracking', label: 'المتابعة الشهرية' },
-    { id: 'dashboard', label: 'الملخص' },
-    { id: 'oil', label: 'متابعة الزيت' },
-    { id: 'insurance', label: 'التأمين والحوادث' },
-    { id: 'licenses', label: 'الترخيص السنوي' },
+    { id: 'tracking', label: lang === 'ar' ? 'المتابعة الشهرية' : 'Monthly tracking' },
+    { id: 'dashboard', label: lang === 'ar' ? 'الملخص' : 'Summary' },
+    { id: 'oil', label: lang === 'ar' ? 'متابعة الزيت' : 'Oil maintenance' },
+    { id: 'insurance', label: lang === 'ar' ? 'التأمين والحوادث' : 'Insurance & accidents' },
+    { id: 'licenses', label: lang === 'ar' ? 'الترخيص السنوي' : 'Annual license' },
     { id: 'settings', label: lang === 'ar' ? 'الإعدادات' : 'Settings' },
   ];
 
@@ -822,10 +1195,10 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
       <div
         id="taxi-app"
         className="min-h-screen bg-slate-100 flex items-center justify-center"
-        dir="rtl"
+        dir={appDir(lang)}
       >
         <div className="text-center p-8">
-          <p className="text-slate-600 text-lg">جاري تحميل البيانات...</p>
+          <p className="text-slate-600 text-lg">{loadingCopy[lang].fleet}</p>
           {loadError && <p className="text-red-600 text-sm mt-2">{loadError}</p>}
         </div>
       </div>
@@ -841,63 +1214,157 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
         data-bold-numbers={globalSettings.boldNumbers ? 'true' : 'false'}
         data-large-buttons={globalSettings.largeButtons ? 'true' : 'false'}
         data-comfortable-reading={globalSettings.comfortableReading ? 'true' : 'false'}
-        className="min-h-screen bg-slate-100"
-        dir={lang === 'ar' ? 'rtl' : 'ltr'}
+        className="app-layout app-compact bg-slate-100"
+        dir={appDir(lang)}
       >
-        <header className="app-header bg-white border-b border-slate-200 sticky top-0 z-40">
-          <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
-            <h1 className="text-xl font-bold text-slate-900">VIP limousine CARS</h1>
+        {toast && (
+          <AppToast
+            message={toast.message}
+            tone={toast.tone}
+            onDismiss={dismissToast}
+            dir={appDir(lang)}
+          />
+        )}
+        <ConfirmDialog
+          open={showLogoutConfirm}
+          title={lang === 'ar' ? 'تسجيل الخروج' : 'Sign out'}
+          message={lang === 'ar' ? 'هل تريد تسجيل الخروج؟' : 'Do you want to sign out?'}
+          confirmLabel={lang === 'ar' ? 'نعم، خروج' : 'Yes, sign out'}
+          cancelLabel={lang === 'ar' ? 'إلغاء' : 'Cancel'}
+          variant="neutral"
+          dir={appDir(lang)}
+          showIrreversibleNote={false}
+          onCancel={() => setShowLogoutConfirm(false)}
+          onConfirm={() => {
+            setShowLogoutConfirm(false);
+            onLogout();
+          }}
+        />
+        <header className="app-layout__header app-header bg-white border-b border-slate-200 z-40">
+          <div className="max-w-5xl mx-auto px-3 sm:px-4 py-2 flex items-center justify-between gap-3">
+            <h1 className="text-sm sm:text-base font-bold text-slate-900 truncate">VIP limousine CARS</h1>
+            <div className="flex items-center gap-2">
+              {canReviewDeletions(session) && (
+                <DeletionApprovalsButton
+                  lang={lang}
+                  pendingCount={pendingDeletionCount}
+                  onRefreshCount={refreshPendingDeletionCount}
+                  onReviewed={(req) => void handleDeletionReviewed(req)}
+                />
+              )}
             <ProfileMenu
               session={session}
               lang={lang}
               setLang={setLang}
               settings={{ ...DEFAULT_SETTINGS, ...globalSettings }}
               onSettingsChange={(s) => {
-                const g: FleetGlobalSettings = {
+                applyGlobalSettings({
                   fontSize: s.fontSize,
                   displayTheme: s.displayTheme,
                   boldNumbers: s.boldNumbers,
                   largeButtons: s.largeButtons,
                   comfortableReading: s.comfortableReading,
-                };
-                setFleet((f) => (f ? { ...f, globalSettings: g } : f));
+                });
               }}
               onOpenAccessibility={() => setShowDisplayPanel(true)}
-              onLogout={() => {
-                if (window.confirm(lang === 'ar' ? 'تسجيل الخروج؟' : 'Sign out?')) {
-                  onLogout();
-                }
-              }}
+              onLogout={() => setShowLogoutConfirm(true)}
             />
+            </div>
           </div>
+          <nav className="home-page-nav border-b border-slate-200 bg-white" aria-label={lang === 'ar' ? 'تبويبات الصفحة الرئيسية' : 'Home page tabs'}>
+            <div className="home-page-nav__inner max-w-5xl mx-auto px-3 sm:px-4">
+              <div className="home-page-nav__tabs" role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={homeTab === 'fleet'}
+                  onClick={() => setHomeTab('fleet')}
+                  className={`app-nav-tab flex-shrink-0 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    homeTab === 'fleet'
+                      ? 'border-blue-600 text-blue-700'
+                      : 'border-transparent text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <span className="app-nav-tab-label">
+                    {lang === 'ar' ? 'الأسطول' : 'Fleet'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={homeTab === 'settings'}
+                  onClick={() => setHomeTab('settings')}
+                  className={`app-nav-tab flex-shrink-0 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    homeTab === 'settings'
+                      ? 'border-blue-600 text-blue-700'
+                      : 'border-transparent text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <span className="app-nav-tab-label">
+                    {lang === 'ar' ? 'الإعدادات' : 'Settings'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </nav>
         </header>
-        <main className="max-w-6xl mx-auto px-4 py-6">
-          <VehicleGarage
-            vehicles={fleet?.vehicles ?? []}
-            onSelect={setSelectedVehicleId}
-            onAddVehicle={handleAddVehicle}
-            onDeleteVehicle={handleDeleteVehicle}
-          />
+        <main className="app-layout__main vehicle-garage-page max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-5 w-full">
+          {authError && (
+            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              {loadError}
+            </div>
+          )}
+          {loadError && !authError && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              {loadError}
+            </div>
+          )}
+          {!isAdmin(session) &&
+            (fleet?.vehicles.length ?? 0) === 0 &&
+            !loadError &&
+            storageSource === 'sql' && (
+              <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                {lang === 'ar'
+                  ? 'لا توجد سيارات مسندة لحسابك. اطلب من المدير فتح الإعدادات وتعيين سيارة لك.'
+                  : 'No vehicles are assigned to your account. Ask an admin to assign a car to you in Settings.'}
+              </div>
+            )}
+          {homeTab === 'fleet' ? (
+            <VehicleGarage
+              session={session}
+              lang={lang}
+              vehicles={fleet?.vehicles ?? []}
+              onSelect={(id) => {
+                setHomeTab('fleet');
+                setSelectedVehicleId(id);
+              }}
+              onAddVehicle={handleAddVehicle}
+              onDeleteVehicle={
+                canDeleteVehicle(session) ? handleDeleteVehicle : undefined
+              }
+            />
+          ) : (
+            <HomeSettingsTab
+              session={session}
+              lang={lang}
+              storageSource={storageSource}
+              vehicleCount={fleet?.vehicles.length ?? 0}
+              onDeletionReviewed={(req) => void handleDeletionReviewed(req)}
+            />
+          )}
         </main>
         <DisplayAccessibilityPanel
           open={showDisplayPanel}
           onClose={() => setShowDisplayPanel(false)}
           settings={{ ...DEFAULT_SETTINGS, ...globalSettings }}
           onChange={(s) =>
-            setFleet((f) =>
-              f
-                ? {
-                    ...f,
-                    globalSettings: {
-                      fontSize: s.fontSize,
-                      displayTheme: s.displayTheme,
-                      boldNumbers: s.boldNumbers,
-                      largeButtons: s.largeButtons,
-                      comfortableReading: s.comfortableReading,
-                    },
-                  }
-                : f
-            )
+            applyGlobalSettings({
+              fontSize: s.fontSize,
+              displayTheme: s.displayTheme,
+              boldNumbers: s.boldNumbers,
+              largeButtons: s.largeButtons,
+              comfortableReading: s.comfortableReading,
+            })
           }
         />
       </div>
@@ -909,9 +1376,9 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
       <div
         id="taxi-app"
         className="min-h-screen bg-slate-100 flex items-center justify-center"
-        dir="rtl"
+        dir={appDir(lang)}
       >
-        <p className="text-slate-600 text-lg">جاري تحميل السيارة...</p>
+        <p className="text-slate-600 text-lg">{loadingCopy[lang].vehicle}</p>
       </div>
     );
   }
@@ -925,9 +1392,80 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
       data-large-buttons={settings.largeButtons ? 'true' : 'false'}
       data-comfortable-reading={settings.comfortableReading ? 'true' : 'false'}
       data-entry-form-open={showForm ? 'true' : 'false'}
-      className="min-h-screen"
-      dir={lang === 'ar' ? 'rtl' : 'ltr'}
+      className="app-layout app-compact"
+      dir={appDir(lang)}
     >
+      {toast && (
+        <AppToast
+          message={toast.message}
+          tone={toast.tone}
+          onDismiss={dismissToast}
+          dir={appDir(lang)}
+        />
+      )}
+      <ConfirmDialog
+        open={showLogoutConfirm}
+        title={lang === 'ar' ? 'تسجيل الخروج' : 'Sign out'}
+        message={lang === 'ar' ? 'هل تريد تسجيل الخروج؟' : 'Do you want to sign out?'}
+        confirmLabel={lang === 'ar' ? 'نعم، خروج' : 'Yes, sign out'}
+        cancelLabel={lang === 'ar' ? 'إلغاء' : 'Cancel'}
+        variant="neutral"
+        dir={appDir(lang)}
+        showIrreversibleNote={false}
+        onCancel={() => setShowLogoutConfirm(false)}
+        onConfirm={() => {
+          setShowLogoutConfirm(false);
+          onLogout();
+        }}
+      />
+      <ConfirmDialog
+        open={importBackupConfirm != null}
+        title={lang === 'ar' ? 'استيراد نسخة احتياطية' : 'Import backup'}
+        message={
+          importBackupConfirm ? (
+            importBackupConfirm.currentCount > 0 ? (
+              lang === 'ar' ? (
+                <>
+                  سيتم استبدال{' '}
+                  <strong className="tabular-nums">{importBackupConfirm.currentCount}</strong>{' '}
+                  سجل/سجلات حالية بالنسخة الاحتياطية (
+                  <strong className="tabular-nums">{importBackupConfirm.importedCount}</strong>{' '}
+                  شهر). متابعة؟
+                </>
+              ) : (
+                <>
+                  Replace{' '}
+                  <strong className="tabular-nums">{importBackupConfirm.currentCount}</strong>{' '}
+                  current entries with the backup (
+                  <strong className="tabular-nums">{importBackupConfirm.importedCount}</strong>{' '}
+                  months). Continue?
+                </>
+              )
+            ) : lang === 'ar' ? (
+              <>
+                استيراد{' '}
+                <strong className="tabular-nums">{importBackupConfirm.importedCount}</strong>{' '}
+                سجل/سجلات من النسخة الاحتياطية. متابعة؟
+              </>
+            ) : (
+              <>
+                Import{' '}
+                <strong className="tabular-nums">{importBackupConfirm.importedCount}</strong>{' '}
+                entries from backup. Continue?
+              </>
+            )
+          ) : (
+            ''
+          )
+        }
+        confirmLabel={lang === 'ar' ? 'نعم، استيراد' : 'Yes, import'}
+        cancelLabel={lang === 'ar' ? 'إلغاء' : 'Cancel'}
+        variant="neutral"
+        dir={appDir(lang)}
+        showIrreversibleNote={false}
+        onCancel={() => setImportBackupConfirm(null)}
+        onConfirm={() => void confirmImportBackup()}
+      />
       {showConfirmDialog && pendingEntry && (
         <MonthlyEntryConfirmModal
           open={showConfirmDialog}
@@ -954,66 +1492,46 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
         />
       )}
       {showBackupReminder && (
-        <div className="bg-amber-50 border-b border-amber-200">
-          <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <p className="text-sm text-amber-900">
-              <span className="font-semibold">تذكير نسخ احتياطي أسبوعي:</span>{' '}
+        <div className="app-layout__banner app-backup-strip">
+          <div className="max-w-6xl mx-auto px-3 py-1.5 flex items-center justify-between gap-2">
+            <p className="text-xs text-amber-900 truncate min-w-0">
+              <span className="font-semibold">نسخ احتياطي:</span>{' '}
               {backupStatus.hasBackupBefore ? (
                 <>
                   آخر نسخة قبل{' '}
-                  <span className="tabular-nums font-semibold">
-                    {fmtInt(backupStatus.daysSinceBackup ?? 0)}
-                  </span>{' '}
-                  يوم — يُفضَّل كل {fmtInt(BACKUP_INTERVAL_DAYS)} أيام
+                  <span className="tabular-nums">{fmtInt(backupStatus.daysSinceBackup ?? 0)}</span> يوم
                 </>
               ) : (
-                <>لم تُسجَّل نسخة احتياطية بعد — احفظ ملف JSON على جهازك</>
+                <>لم تُسجَّل نسخة بعد</>
               )}
             </p>
-            <div className="flex gap-2 shrink-0">
+            <div className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
                 onClick={handleExportBackup}
-                className="px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700"
+                className="px-2.5 py-1 bg-amber-600 text-white text-xs font-medium rounded-md hover:bg-amber-700"
               >
-                تصدير نسخة احتياطية الآن
+                تصدير
               </button>
               <button
                 type="button"
                 onClick={() => setBackupBannerDismissed(true)}
-                className="px-3 py-2 text-amber-800 text-sm rounded-lg hover:bg-amber-100"
+                className="px-2 py-1 text-amber-800 text-xs rounded-md hover:bg-amber-100"
+                aria-label="إخفاء التذكير"
               >
-                لاحقاً
+                ✕
               </button>
             </div>
           </div>
         </div>
       )}
-      <header className="app-header bg-white border-b border-slate-200 sticky top-0 z-40">
-        <div className="max-w-6xl mx-auto px-4 py-4">
-          <div className="app-header-bar flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <button
-                type="button"
-                onClick={() => void handleBackToGarage()}
-                className="shrink-0 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100"
-              >
-                ← السيارات
-              </button>
+      <header className="app-layout__header app-vehicle-header bg-white border-b border-slate-200 z-40">
+        <div className="max-w-6xl mx-auto px-3 py-2">
+          <div className="app-vehicle-header__row flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
               <VehicleHeaderBrand
                 vehicleLabel={settings.vehicleLabel}
                 ownerName={settings.ownerName}
-                vehicleImage={settings.vehicleImage || undefined}
-                onImageChange={(image) => {
-                  if (!hasVehicleImage(image)) {
-                    alert(VEHICLE_IMAGE_REQUIRED_MSG);
-                    return;
-                  }
-                  persist({
-                    ...state,
-                    settings: { ...settings, vehicleImage: image ?? '' },
-                  });
-                }}
                 onLabelChange={(label) =>
                   persist({
                     ...state,
@@ -1022,24 +1540,25 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
                 }
               />
             </div>
-            {!hasVehicleImage(settings.vehicleImage) && (
-              <p className="w-full text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
-                {VEHICLE_IMAGE_REQUIRED_MSG} — اضغط مربع الصورة أعلاه لرفعها قبل المتابعة.
-              </p>
-            )}
-            <div className="app-header-actions flex flex-wrap items-center gap-2 shrink-0">
+            <div className="app-header-actions flex items-center gap-1.5 shrink-0">
               {licenseSummary.renewalAlerts.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setTab('licenses')}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-50 text-amber-900 border border-amber-300 rounded-lg text-sm font-medium hover:bg-amber-100 text-right"
+                  className="hidden sm:inline-flex items-center gap-1 px-2 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded-md text-xs font-medium hover:bg-amber-100"
                   title="عرض تنبيهات تجديد الترخيص"
                 >
-                  <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
-                  <span>
-                    تنبيه ترخيص ({fmtInt(licenseSummary.renewalAlerts.length)})
-                  </span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                  <span>ترخيص ({fmtInt(licenseSummary.renewalAlerts.length)})</span>
                 </button>
+              )}
+              {canReviewDeletions(session) && (
+                <DeletionApprovalsButton
+                  lang={lang}
+                  pendingCount={pendingDeletionCount}
+                  onRefreshCount={refreshPendingDeletionCount}
+                  onReviewed={(req) => void handleDeletionReviewed(req)}
+                />
               )}
               <ProfileMenu
                 session={session}
@@ -1048,21 +1567,42 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
                 settings={settings}
                 onSettingsChange={(s) => persist({ ...state, settings: s })}
                 onOpenAccessibility={() => setShowDisplayPanel(true)}
-                onLogout={() => {
-                  if (window.confirm(lang === 'ar' ? 'تسجيل الخروج؟' : 'Sign out?')) {
-                    onLogout();
-                  }
-                }}
+                onLogout={() => setShowLogoutConfirm(true)}
               />
+              <button
+                type="button"
+                onClick={() => void handleBackToGarage()}
+                className="app-back-btn shrink-0 px-2.5 py-1 text-xs sm:text-sm font-medium text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50"
+              >
+                {lang === 'ar' ? 'السيارات →' : '← Fleet'}
+              </button>
             </div>
           </div>
-          <nav className="flex gap-1 mt-4 border-b border-slate-200 -mb-px overflow-x-auto">
+          {!hasVehicleImage(settings.vehicleImage) && (
+            <p className="mt-1.5 text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-2 py-1">
+              {VEHICLE_IMAGE_REQUIRED_MSG} —{' '}
+              <button
+                type="button"
+                className="font-semibold underline hover:text-amber-900"
+                onClick={() => setTab('settings')}
+              >
+                رفع الصورة من الإعدادات
+              </button>
+            </p>
+          )}
+          <nav
+            className="app-nav-tabs mt-2 border-b border-slate-200 -mb-px"
+            aria-label={lang === 'ar' ? 'تبويبات السيارة' : 'Vehicle tabs'}
+          >
+            <div className="flex overflow-x-auto" role="tablist">
             {tabs.map((t) => (
               <button
                 key={t.id}
                 type="button"
+                role="tab"
+                aria-selected={tab === t.id}
                 onClick={() => setTab(t.id)}
-                className={`app-nav-tab flex-shrink-0 px-3 sm:px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                className={`app-nav-tab flex-shrink-0 px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium border-b-2 transition-colors ${
                   tab === t.id
                     ? 'border-blue-600 text-blue-700'
                     : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -1074,15 +1614,12 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
                 </span>
               </button>
             ))}
+            </div>
           </nav>
         </div>
       </header>
 
-      <main
-        className={`max-w-6xl mx-auto px-4 py-6 ${
-          showForm ? 'pb-36 sm:pb-28' : 'pb-24'
-        }`}
-      >
+      <main className="app-layout__main max-w-6xl mx-auto px-3 sm:px-4 py-3 sm:py-4 w-full">
         {(tab === 'tracking' || tab === 'oil') && oilChangeAlert && (
           <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             <span className="font-semibold">تنبيه زيت: </span>
@@ -1119,6 +1656,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
             lateCount={totals.lateCount}
             paidCount={totals.paidCount}
             totalRemaining={totals.totalRemaining}
+            formError={entryFormError}
           />
         )}
         {tab === 'insurance' && (
@@ -1130,6 +1668,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
             onAccidentsChange={(next) =>
               persistImmediate((prev) => ({ ...prev, accidents: next }))
             }
+            onDeleteAccident={handleDeleteAccident}
           />
         )}
         {tab === 'licenses' && (
@@ -1139,6 +1678,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
             onLicensesChange={(next) =>
               persistImmediate((prev) => ({ ...prev, licenses: next }))
             }
+            onDeleteLicense={handleDeleteLicense}
           />
         )}
         {tab === 'oil' && (
@@ -1154,19 +1694,37 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
           <SettingsTab
             settings={settings}
             entryCount={entries.length}
+            session={session}
             onOpenOilTab={() => setTab('oil')}
             onChange={(s) => persist({ ...state, settings: s })}
+            onImageChange={(image) => {
+              if (!hasVehicleImage(image)) {
+                showToast(VEHICLE_IMAGE_REQUIRED_MSG, 'error');
+                return;
+              }
+              persist({
+                ...state,
+                settings: { ...settings, vehicleImage: image },
+              });
+            }}
             onExportBackup={handleExportBackup}
             onImportBackup={handleImportBackup}
             backupInputRef={backupInputRef}
             backupStatus={backupStatus}
             storageSource={storageSource}
-            onClearEntries={() => entries.length > 0 && setShowDeleteAllDialog(true)}
+            onClearEntries={() => {
+              if (entries.length > 0) setShowDeleteAllDialog(true);
+            }}
             isExporting={isExporting}
             onExportExcel={handleExportExcel}
             onExportPdf={handleExportPdf}
             onBack={() => setTab('tracking')}
             lang={lang}
+            vehicleId={selectedVehicleId ?? ''}
+            assignedUserId={currentVehicleMeta?.assignedUserId}
+            assignedUserDisplayName={currentVehicleMeta?.assignedUserDisplayName}
+            onVehicleReassigned={() => void refreshFleet()}
+            onDeletionReviewed={(req) => void handleDeletionReviewed(req)}
           />
         )}
         {tab === 'dashboard' && (
@@ -1261,58 +1819,48 @@ const DeleteEntryConfirmDialog: React.FC<{
   onCancel: () => void;
   onConfirm: () => void;
 }> = ({ entry, onCancel, onConfirm }) => (
-  <div
-    className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/55 p-0 sm:p-4"
-    onClick={onCancel}
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="delete-entry-title"
-    dir="rtl"
-  >
-    <div
-      className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-sm w-full border border-red-200 overflow-hidden"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="bg-red-600 px-5 py-3.5 text-white flex items-center gap-2">
+  <AppModal open onClose={onCancel} size="sm" zIndex={60} panelClassName="border border-red-200">
+    <AppModalHeader variant="danger">
+      <div className="flex items-center gap-2">
         <IconTrash className="w-5 h-5 shrink-0 opacity-90" />
-        <h2 id="delete-entry-title" className="text-base font-bold">
-          تأكيد الحذف
-        </h2>
+        <h2 className="text-base font-bold">تأكيد الحذف</h2>
       </div>
-      <div className="p-5 text-right space-y-4">
-        <p className="text-sm text-slate-700 leading-relaxed">
-          هل أنت متأكد أنك تريد حذف سجل شهر{' '}
-          <strong className="tabular-nums text-slate-900">{entry.month}</strong>
-          {entry.driverName?.trim() ? (
-            <>
-              {' '}
-              للسائق <strong>{entry.driverName}</strong>
-            </>
-          ) : null}
-          ؟
-        </p>
-        <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-          لا يمكن التراجع عن هذا الإجراء.
-        </p>
-        <div className="flex flex-col-reverse sm:flex-row gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="flex-1 py-2.5 rounded-lg border border-slate-300 text-slate-800 text-sm font-medium hover:bg-slate-50 min-h-[44px]"
-          >
-            لا، إلغاء
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            className="flex-1 py-2.5 rounded-lg bg-red-600 text-white text-sm font-bold hover:bg-red-700 min-h-[44px]"
-          >
-            نعم، احذف
-          </button>
-        </div>
+    </AppModalHeader>
+    <AppModalBody>
+      <p className="text-sm text-slate-700 leading-relaxed">
+        هل أنت متأكد أنك تريد حذف سجل شهر{' '}
+        <strong className="tabular-nums text-slate-900">{entry.month}</strong>
+        {entry.driverName?.trim() ? (
+          <>
+            {' '}
+            للسائق <strong>{entry.driverName}</strong>
+          </>
+        ) : null}
+        ؟
+      </p>
+      <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mt-4">
+        لا يمكن التراجع عن هذا الإجراء.
+      </p>
+    </AppModalBody>
+    <AppModalFooter>
+      <div className="flex flex-col-reverse sm:flex-row gap-2 pt-3">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex-1 py-2.5 rounded-lg border border-slate-300 text-slate-800 text-sm font-medium hover:bg-slate-50 min-h-[44px]"
+        >
+          لا، إلغاء
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="flex-1 py-2.5 rounded-lg bg-red-600 text-white text-sm font-bold hover:bg-red-700 min-h-[44px]"
+        >
+          نعم، احذف
+        </button>
       </div>
-    </div>
-  </div>
+    </AppModalFooter>
+  </AppModal>
 );
 
 const PayFullAmountConfirmDialog: React.FC<{
@@ -1320,67 +1868,53 @@ const PayFullAmountConfirmDialog: React.FC<{
   onCancel: () => void;
   onConfirm: () => void;
 }> = ({ entry, onCancel, onConfirm }) => (
-  <div
-    className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/55 p-0 sm:p-4"
-    onClick={onCancel}
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="pay-full-title"
-    dir="rtl"
-  >
-    <div
-      className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-sm w-full border border-emerald-200 overflow-hidden"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="bg-emerald-600 px-5 py-3.5 text-white">
-        <h2 id="pay-full-title" className="text-base font-bold">
-          تسديد المبلغ
-        </h2>
-      </div>
-      <div className="p-5 text-right space-y-4">
-        <p className="text-sm text-slate-700 leading-relaxed">
-          هل أنت متأكد من دفع المبلغ كامل؟
+  <AppModal open onClose={onCancel} size="sm" zIndex={60} panelClassName="border border-emerald-200">
+    <AppModalHeader variant="success">
+      <h2 className="text-base font-bold">تسديد المبلغ</h2>
+    </AppModalHeader>
+    <AppModalBody>
+      <p className="text-sm text-slate-700 leading-relaxed">هل أنت متأكد من دفع المبلغ كامل؟</p>
+      <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2.5 text-sm space-y-1 mt-4">
+        <p className="text-slate-600">
+          الشهر: <strong className="tabular-nums text-slate-900">{entry.month}</strong>
         </p>
-        <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2.5 text-sm space-y-1">
+        <p className="text-slate-600">
+          المبلغ الكامل:{' '}
+          <strong className="tabular-nums text-emerald-800">{fmt(entry.totalDue)} د.أ</strong>
+        </p>
+        {entry.remaining > 0 && (
           <p className="text-slate-600">
-            الشهر: <strong className="tabular-nums text-slate-900">{entry.month}</strong>
+            المتبقي الآن:{' '}
+            <strong className="tabular-nums text-red-600">{fmt(entry.remaining)} د.أ</strong>
           </p>
-          <p className="text-slate-600">
-            المبلغ الكامل:{' '}
-            <strong className="tabular-nums text-emerald-800">{fmt(entry.totalDue)} د.أ</strong>
-          </p>
-          {entry.remaining > 0 && (
-            <p className="text-slate-600">
-              المتبقي الآن:{' '}
-              <strong className="tabular-nums text-red-600">{fmt(entry.remaining)} د.أ</strong>
-            </p>
-          )}
-          <p className="text-xs text-emerald-800 pt-1">
-            سيُسجَّل كـ ٣ دفعات ضمان:{' '}
-            <span className="tabular-nums font-semibold">
-              {entry.installmentTargets.map((p) => fmt(p)).join(' + ')}
-            </span>
-          </p>
-        </div>
-        <div className="flex flex-col-reverse sm:flex-row gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="flex-1 py-2.5 rounded-lg border border-slate-300 text-slate-800 text-sm font-medium hover:bg-slate-50 min-h-[44px]"
-          >
-            لا، إلغاء
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            className="flex-1 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 min-h-[44px]"
-          >
-            نعم، تسديد كامل
-          </button>
-        </div>
+        )}
+        <p className="text-xs text-emerald-800 pt-1">
+          سيُسجَّل كـ ٣ دفعات ضمان:{' '}
+          <span className="tabular-nums font-semibold">
+            {entry.installmentTargets.map((p) => fmt(p)).join(' + ')}
+          </span>
+        </p>
       </div>
-    </div>
-  </div>
+    </AppModalBody>
+    <AppModalFooter>
+      <div className="flex flex-col-reverse sm:flex-row gap-2 pt-3">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex-1 py-2.5 rounded-lg border border-slate-300 text-slate-800 text-sm font-medium hover:bg-slate-50 min-h-[44px]"
+        >
+          لا، إلغاء
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="flex-1 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 min-h-[44px]"
+        >
+          نعم، تسديد كامل
+        </button>
+      </div>
+    </AppModalFooter>
+  </AppModal>
 );
 
 /* ——— Delete all confirmation ——— */
@@ -1400,32 +1934,29 @@ const DeleteAllConfirmDialog: React.FC<{
     acknowledged && typed.trim() === DELETE_ALL_CONFIRM_PHRASE && entryCount > 0;
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-4"
-      onClick={onCancel}
-      role="dialog"
-      aria-modal="true"
+    <AppModal
+      open
+      onClose={onCancel}
+      size="md"
+      zIndex={60}
+      panelClassName="border-2 border-red-300"
       aria-labelledby="delete-all-title"
     >
-      <div
-        className="bg-white rounded-2xl shadow-2xl max-w-md w-full border-2 border-red-300 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="bg-red-600 px-5 py-4 text-white">
-          <div className="flex items-start gap-3">
-            <span className="text-2xl leading-none" aria-hidden>
-              ⚠
-            </span>
-            <div>
-              <h2 id="delete-all-title" className="text-lg font-bold">
-                تأكيد حذف كل البيانات
-              </h2>
-              <p className="text-red-100 text-sm mt-1">هذا الإجراء خطير ولا يمكن التراجع عنه</p>
-            </div>
+      <AppModalHeader variant="danger">
+        <div className="flex items-start gap-3">
+          <span className="text-2xl leading-none" aria-hidden>
+            ⚠
+          </span>
+          <div>
+            <h2 id="delete-all-title" className="text-lg font-bold">
+              تأكيد حذف كل البيانات
+            </h2>
+            <p className="text-red-100 text-sm mt-1">هذا الإجراء خطير ولا يمكن التراجع عنه</p>
           </div>
         </div>
+      </AppModalHeader>
 
-        <div className="p-5 space-y-4 text-right">
+      <AppModalBody className="space-y-4">
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-900 space-y-2">
             <p className="font-semibold">
               سيتم حذف{' '}
@@ -1473,26 +2004,28 @@ const DeleteAllConfirmDialog: React.FC<{
             />
           </div>
 
-          <div className="flex flex-col-reverse sm:flex-row gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="flex-1 py-2.5 rounded-lg border border-slate-300 text-slate-800 text-sm font-medium hover:bg-slate-50"
-            >
-              إلغاء — لا تحذف
-            </button>
-            <button
-              type="button"
-              disabled={!canDelete}
-              onClick={onConfirm}
-              className="flex-1 py-2.5 rounded-lg bg-red-600 text-white text-sm font-bold hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              نعم، احذف كل السجلات
-            </button>
-          </div>
+      </AppModalBody>
+
+      <AppModalFooter>
+        <div className="flex flex-col-reverse sm:flex-row gap-2 pt-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 py-2.5 rounded-lg border border-slate-300 text-slate-800 text-sm font-medium hover:bg-slate-50"
+          >
+            إلغاء — لا تحذف
+          </button>
+          <button
+            type="button"
+            disabled={!canDelete}
+            onClick={onConfirm}
+            className="flex-1 py-2.5 rounded-lg bg-red-600 text-white text-sm font-bold hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            نعم، احذف كل السجلات
+          </button>
         </div>
-      </div>
-    </div>
+      </AppModalFooter>
+    </AppModal>
   );
 };
 
@@ -1502,29 +2035,23 @@ const SuccessDialog: React.FC<{ message: string; onClose: () => void }> = ({
   message,
   onClose,
 }) => (
-  <div
-    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-    onClick={onClose}
-    role="dialog"
-    aria-modal="true"
-  >
-    <div
-      className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 text-center border border-green-200"
-      onClick={(e) => e.stopPropagation()}
-    >
+  <AppModal open onClose={onClose} size="sm" zIndex={50} panelClassName="border border-green-200">
+    <AppModalBody className="text-center !py-6">
       <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-green-100 flex items-center justify-center text-2xl text-green-600">
         ✓
       </div>
       <p className="text-lg font-semibold text-slate-800 leading-relaxed">{message}</p>
+    </AppModalBody>
+    <AppModalFooter>
       <button
         type="button"
         onClick={onClose}
-        className="mt-6 w-full py-2.5 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700"
+        className="w-full py-2.5 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700"
       >
         حسناً
       </button>
-    </div>
-  </div>
+    </AppModalFooter>
+  </AppModal>
 );
 
 /* ——— Tracking pagination ——— */
@@ -1535,8 +2062,9 @@ const PaginationBar: React.FC<{
   rangeStart: number;
   rangeEnd: number;
   total: number;
+  pageSize: number;
   onPageChange: (page: number) => void;
-}> = ({ page, totalPages, rangeStart, rangeEnd, total, onPageChange }) => {
+}> = ({ page, totalPages, rangeStart, rangeEnd, total, pageSize, onPageChange }) => {
   if (total === 0) return null;
 
   const pages: number[] = [];
@@ -1555,7 +2083,7 @@ const PaginationBar: React.FC<{
         </span>{' '}
         من <span className="font-semibold text-slate-800">{fmtInt(total)}</span> سجل
         <span className="text-slate-400 mx-1">·</span>
-        {fmtInt(TRACKING_PAGE_SIZE)} لكل صفحة
+        {fmtInt(pageSize)} لكل صفحة
       </p>
       <div className="flex items-center gap-1 flex-wrap justify-center">
         <button
@@ -1971,14 +2499,18 @@ const TrackingEntriesTable: React.FC<{
 }) => (
   <div className="tracking-table-outer border border-slate-100 rounded-lg">
     <div className="tracking-table-scroll">
-      <table className="tracking-table w-full text-sm min-w-[820px]">
+      <table className="tracking-table w-full text-sm min-w-0 lg:min-w-[720px]">
         <thead>
           <tr className="bg-blue-600 text-white text-sm">
             <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">الشهر</th>
-            <th className="py-3 px-3 text-right font-semibold">السائق</th>
+            <th className="py-3 px-3 text-right font-semibold tracking-col-driver">السائق</th>
             <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">الإيراد</th>
-            <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">المصاريف</th>
-            <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">الصافي</th>
+            <th className="py-3 px-3 text-right font-semibold whitespace-nowrap tracking-col-optional">
+              المصاريف
+            </th>
+            <th className="py-3 px-3 text-right font-semibold whitespace-nowrap tracking-col-optional">
+              الصافي
+            </th>
             <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">المدفوع</th>
             <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">المتبقي</th>
             <th className="py-3 px-3 text-right font-semibold">الحالة</th>
@@ -2007,15 +2539,17 @@ const TrackingEntriesTable: React.FC<{
                 <td className="py-3 px-3 tabular-nums font-semibold text-slate-800 whitespace-nowrap">
                   {row.month}
                 </td>
-                <td className="py-3 px-3 font-medium text-slate-800">{row.driverName}</td>
+                <td className="py-3 px-3 font-medium text-slate-800 tracking-col-driver">
+                  {row.driverName}
+                </td>
                 <td className="py-3 px-3 tabular-nums text-green-700 font-semibold">
                   {fmt(row.revenue)}
                 </td>
-                <td className="py-3 px-3 tabular-nums text-orange-700 font-semibold">
+                <td className="py-3 px-3 tabular-nums text-orange-700 font-semibold tracking-col-optional">
                   {fmt(row.expenses)}
                 </td>
                 <td
-                  className={`py-3 px-3 tabular-nums font-semibold ${
+                  className={`py-3 px-3 tabular-nums font-semibold tracking-col-optional ${
                     row.net >= 0 ? 'text-blue-700' : 'text-red-600'
                   }`}
                 >
@@ -2079,6 +2613,7 @@ interface TrackingTabProps {
   lateCount: number;
   paidCount: number;
   totalRemaining: number;
+  formError?: string;
 }
 
 const TrackingTab: React.FC<TrackingTabProps> = ({
@@ -2101,6 +2636,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
   lateCount,
   paidCount,
   totalRemaining,
+  formError,
 }) => {
   const editingEntry = editingId ? entries.find((e) => e.id === editingId) : undefined;
   const formGuarantee = editingEntry?.guarantee ?? guarantee;
@@ -2172,9 +2708,30 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
     [filteredEntries, sortOrder]
   );
 
+  const pageSize = useFitPageSize(
+    {
+      rowHeight: viewMode === 'table' ? 38 : 100,
+      reservedTop: showForm ? 460 : 280,
+      min: 5,
+      max: 10,
+    },
+    [viewMode, showForm]
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(max-width: 900px)');
+    const apply = () => {
+      if (mq.matches && viewMode === 'table') setViewModePersisted('cards');
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, [viewMode]);
+
   const pagination = useMemo(
-    () => paginateEntries(sortedEntries, page, TRACKING_PAGE_SIZE),
-    [sortedEntries, page]
+    () => paginateEntries(sortedEntries, page, pageSize),
+    [sortedEntries, page, pageSize]
   );
 
   const setViewModePersisted = (mode: TrackingViewMode) => {
@@ -2210,22 +2767,20 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
 
   useEffect(() => {
     if (!editingId) return;
-    const targetPage = findEntryPage(sortedEntries, editingId, TRACKING_PAGE_SIZE);
+    const targetPage = findEntryPage(sortedEntries, editingId, pageSize);
     if (targetPage != null) setPage(targetPage);
-  }, [editingId, sortedEntries]);
+  }, [editingId, sortedEntries, pageSize]);
 
   useEffect(() => {
     if (page > pagination.totalPages) setPage(pagination.totalPages);
   }, [page, pagination.totalPages]);
 
   useEffect(() => {
-    if (showForm && formRef.current) {
-      formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, [showForm, editingId]);
+    setPage(1);
+  }, [pageSize, viewMode]);
 
   return (
-    <div className="tracking-tab space-y-4">
+    <div className="tracking-tab space-y-2 sm:space-y-3">
       {entryPendingDelete && (
         <DeleteEntryConfirmDialog
           entry={entryPendingDelete}
@@ -2313,6 +2868,14 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
             </div>
           ) : (
             <h2 className="font-semibold text-slate-800">إضافة دفع ضمان</h2>
+          )}
+          {formError && (
+            <div
+              className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+              role="alert"
+            >
+              {formError}
+            </div>
           )}
           <div className="entry-form-meta grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <label className="block sm:col-span-2 lg:col-span-1">
@@ -2685,13 +3248,14 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
           )}
         </p>
 
-        {sortedEntries.length > TRACKING_PAGE_SIZE && (
+        {sortedEntries.length > pageSize && (
           <PaginationBar
             page={pagination.page}
             totalPages={pagination.totalPages}
             rangeStart={pagination.rangeStart}
             rangeEnd={pagination.rangeEnd}
             total={pagination.total}
+            pageSize={pageSize}
             onPageChange={setPage}
           />
         )}
@@ -2731,13 +3295,14 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
           />
         )}
 
-        {sortedEntries.length > 0 && (
+        {sortedEntries.length > pageSize && (
           <PaginationBar
             page={pagination.page}
             totalPages={pagination.totalPages}
             rangeStart={pagination.rangeStart}
             rangeEnd={pagination.rangeEnd}
             total={pagination.total}
+            pageSize={pageSize}
             onPageChange={setPage}
           />
         )}
@@ -2886,22 +3451,26 @@ const InsuranceAccidentsTab: React.FC<{
   monthlyGuarantee: number;
   defaultDriver: string;
   onAccidentsChange: (accidents: AccidentRecord[]) => void;
+  onDeleteAccident: (id: string) => void | Promise<void>;
 }> = ({
   accidents,
   accidentSummary,
   monthlyGuarantee,
   defaultDriver,
   onAccidentsChange,
+  onDeleteAccident,
 }) => {
   const [form, setForm] = useState(() => emptyAccidentForm(defaultDriver));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [formError, setFormError] = useState('');
 
   const resetForm = () => {
     setForm(emptyAccidentForm(defaultDriver));
     setEditingId(null);
     setShowForm(false);
+    setFormError('');
   };
 
   const openAdd = () => {
@@ -2927,9 +3496,10 @@ const InsuranceAccidentsTab: React.FC<{
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.accidentDate) {
-      alert('يرجى إدخال التاريخ');
+      setFormError('يرجى إدخال التاريخ');
       return;
     }
+    setFormError('');
     const record: AccidentRecord = {
       id: editingId ?? `acc-${Date.now()}`,
       ...form,
@@ -2949,14 +3519,33 @@ const InsuranceAccidentsTab: React.FC<{
 
   const confirmDeleteAccident = () => {
     if (!pendingDeleteId) return;
-    onAccidentsChange(accidents.filter((a) => a.id !== pendingDeleteId));
-    if (editingId === pendingDeleteId) resetForm();
+    const id = pendingDeleteId;
     setPendingDeleteId(null);
+    if (editingId === id) resetForm();
+    void onDeleteAccident(id);
   };
 
   const sorted = [...accidents].sort(
     (a, b) => new Date(b.accidentDate).getTime() - new Date(a.accidentDate).getTime()
   );
+
+  const [accPage, setAccPage] = useState(1);
+  const accPageSize = useFitPageSize(
+    { rowHeight: 42, reservedTop: showForm ? 400 : 300, min: 4, max: 6 },
+    [showForm]
+  );
+  const accPagination = useMemo(
+    () => paginateEntries(sorted, accPage, accPageSize),
+    [sorted, accPage, accPageSize]
+  );
+
+  useEffect(() => {
+    setAccPage(1);
+  }, [accidents.length, showForm]);
+
+  useEffect(() => {
+    if (accPage > accPagination.totalPages) setAccPage(accPagination.totalPages);
+  }, [accPage, accPagination.totalPages]);
 
   const pendingAccident = pendingDeleteId
     ? accidents.find((a) => a.id === pendingDeleteId)
@@ -2974,7 +3563,7 @@ const InsuranceAccidentsTab: React.FC<{
   );
 
   return (
-    <div className="insurance-accidents-tab space-y-5">
+    <div className="insurance-accidents-tab space-y-3">
       <ConfirmDialog
         open={pendingDeleteId != null}
         title="تأكيد حذف الحادث"
@@ -3047,6 +3636,14 @@ const InsuranceAccidentsTab: React.FC<{
           <h3 className="text-sm font-semibold text-amber-900 mb-3">
             {editingId ? 'تعديل سجل حادث' : 'حادث جديد'}
           </h3>
+          {formError && (
+            <div
+              className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 mb-3"
+              role="alert"
+            >
+              {formError}
+            </div>
+          )}
           <div className="accident-form-grid">
             <label className="accident-form-field">
               <span className="accident-form-label">التاريخ</span>
@@ -3149,9 +3746,21 @@ const InsuranceAccidentsTab: React.FC<{
         </form>
       )}
 
+      {sorted.length > accPageSize && (
+        <PaginationBar
+          page={accPagination.page}
+          totalPages={accPagination.totalPages}
+          rangeStart={accPagination.rangeStart}
+          rangeEnd={accPagination.rangeEnd}
+          total={accPagination.total}
+          pageSize={accPageSize}
+          onPageChange={setAccPage}
+        />
+      )}
+
       <div className="tracking-table-outer insurance-table-section border border-slate-200 rounded-xl app-surface">
         <div className="tracking-table-scroll">
-        <table className="tracking-table w-full text-sm min-w-[720px]">
+        <table className="tracking-table w-full text-sm min-w-0 lg:min-w-[640px]">
           <thead>
             <tr className="bg-slate-700 text-white text-sm">
               <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">التاريخ</th>
@@ -3178,7 +3787,7 @@ const InsuranceAccidentsTab: React.FC<{
                 </td>
               </tr>
             ) : (
-              sorted.map((a) => (
+              accPagination.items.map((a) => (
                 <tr
                   key={a.id}
                   className={editingId === a.id ? 'bg-amber-50' : 'hover:bg-slate-50/80'}
@@ -3244,6 +3853,18 @@ const InsuranceAccidentsTab: React.FC<{
         </div>
       </div>
 
+      {sorted.length > accPageSize && (
+        <PaginationBar
+          page={accPagination.page}
+          totalPages={accPagination.totalPages}
+          rangeStart={accPagination.rangeStart}
+          rangeEnd={accPagination.rangeEnd}
+          total={accPagination.total}
+          pageSize={accPageSize}
+          onPageChange={setAccPage}
+        />
+      )}
+
       <p className="text-xs app-text-muted shrink-0">
         في تبويب «الملخص»: إجمالي المصاريف يشمل الإصلاح، وصافي الربح يشمل مستلم التأمين
       </p>
@@ -3284,16 +3905,19 @@ const LicensesTab: React.FC<{
   licenses: LicenseRecord[];
   licenseSummary: LicenseSummary;
   onLicensesChange: (licenses: LicenseRecord[]) => void;
-}> = ({ licenses, licenseSummary, onLicensesChange }) => {
+  onDeleteLicense: (id: string) => void | Promise<void>;
+}> = ({ licenses, licenseSummary, onLicensesChange, onDeleteLicense }) => {
   const [form, setForm] = useState(emptyLicenseForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [formError, setFormError] = useState('');
 
   const resetForm = () => {
     setForm(emptyLicenseForm());
     setEditingId(null);
     setShowForm(false);
+    setFormError('');
   };
 
   const openAdd = () => {
@@ -3316,7 +3940,7 @@ const LicensesTab: React.FC<{
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.licenseDate) {
-      alert('يرجى إدخال تاريخ الترخيص');
+      setFormError('يرجى إدخال تاريخ الترخيص');
       return;
     }
     const year = parseInt(form.licenseDate.slice(0, 4), 10);
@@ -3331,9 +3955,10 @@ const LicensesTab: React.FC<{
       (l) => l.id !== editingId && l.licenseDate === record.licenseDate
     );
     if (duplicate) {
-      alert('يوجد سجل ترخيص بنفس التاريخ مسبقاً');
+      setFormError('يوجد سجل ترخيص بنفس التاريخ مسبقاً');
       return;
     }
+    setFormError('');
     const next = editingId
       ? licenses.map((l) => (l.id === editingId ? record : l))
       : [...licenses, record];
@@ -3347,14 +3972,34 @@ const LicensesTab: React.FC<{
 
   const confirmDeleteLicense = () => {
     if (!pendingDeleteId) return;
-    onLicensesChange(licenses.filter((l) => l.id !== pendingDeleteId));
-    if (editingId === pendingDeleteId) resetForm();
+    const id = pendingDeleteId;
     setPendingDeleteId(null);
+    if (editingId === id) resetForm();
+    void onDeleteLicense(id);
   };
 
   const sorted = [...licenses].sort(
     (a, b) => new Date(b.licenseDate).getTime() - new Date(a.licenseDate).getTime()
   );
+
+  const [licPage, setLicPage] = useState(1);
+  const licPageSize = useFitPageSize(
+    { rowHeight: 42, reservedTop: showForm ? 380 : 280, min: 4, max: 6 },
+    [showForm]
+  );
+  const licPagination = useMemo(
+    () => paginateEntries(sorted, licPage, licPageSize),
+    [sorted, licPage, licPageSize]
+  );
+
+  useEffect(() => {
+    setLicPage(1);
+  }, [licenses.length, showForm]);
+
+  useEffect(() => {
+    if (licPage > licPagination.totalPages) setLicPage(licPagination.totalPages);
+  }, [licPage, licPagination.totalPages]);
+
   const pendingLicense = pendingDeleteId
     ? licenses.find((l) => l.id === pendingDeleteId)
     : undefined;
@@ -3437,6 +4082,14 @@ const LicensesTab: React.FC<{
           <h3 className="text-sm font-semibold text-teal-900 mb-3">
             {editingId ? 'تعديل ترخيص' : 'ترخيص جديد'}
           </h3>
+          {formError && (
+            <div
+              className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 mb-3"
+              role="alert"
+            >
+              {formError}
+            </div>
+          )}
           <div className="accident-form-grid">
             <label className="accident-form-field">
               <span className="accident-form-label">تاريخ الترخيص</span>
@@ -3506,9 +4159,21 @@ const LicensesTab: React.FC<{
         </form>
       )}
 
+      {sorted.length > licPageSize && (
+        <PaginationBar
+          page={licPagination.page}
+          totalPages={licPagination.totalPages}
+          rangeStart={licPagination.rangeStart}
+          rangeEnd={licPagination.rangeEnd}
+          total={licPagination.total}
+          pageSize={licPageSize}
+          onPageChange={setLicPage}
+        />
+      )}
+
       <div className="tracking-table-outer border border-slate-200 rounded-xl app-surface">
         <div className="tracking-table-scroll">
-        <table className="tracking-table w-full text-sm">
+        <table className="tracking-table w-full text-sm min-w-0">
           <thead>
             <tr className="bg-slate-700 text-white text-sm">
               <th className="py-3 px-3 text-right font-semibold whitespace-nowrap">تاريخ الترخيص</th>
@@ -3526,7 +4191,7 @@ const LicensesTab: React.FC<{
                 </td>
               </tr>
             ) : (
-              sorted.map((l) => {
+              licPagination.items.map((l) => {
                 const renewal = getLicenseRenewalInfo(l.licenseDate);
                 return (
                 <tr
@@ -3593,6 +4258,18 @@ const LicensesTab: React.FC<{
         </table>
         </div>
       </div>
+
+      {sorted.length > licPageSize && (
+        <PaginationBar
+          page={licPagination.page}
+          totalPages={licPagination.totalPages}
+          rangeStart={licPagination.rangeStart}
+          rangeEnd={licPagination.rangeEnd}
+          total={licPagination.total}
+          pageSize={licPageSize}
+          onPageChange={setLicPage}
+        />
+      )}
     </div>
   );
 };
@@ -3667,154 +4344,15 @@ const DisplayAccessibilityPanel: React.FC<{
   );
 };
 
-/* ——— Settings UI helpers ——— */
-
-const SettingsToggle: React.FC<{
-  label: string;
-  hint?: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}> = ({ label, hint, checked, onChange }) => (
-  <div className="settings-row">
-    <div>
-      <p className="text-sm font-medium text-slate-800">{label}</p>
-      {hint && <p className="text-xs app-text-muted mt-0.5">{hint}</p>}
-    </div>
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      className="settings-toggle"
-      onClick={() => onChange(!checked)}
-      aria-label={label}
-    />
-  </div>
-);
-
-const SettingsSection: React.FC<{
-  title: string;
-  subtitle?: string;
-  icon?: string;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}> = ({ title, subtitle, icon, children, defaultOpen = true }) => {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <section className="app-surface border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between gap-3 px-5 py-4 text-right hover:bg-slate-50/80 transition-colors"
-      >
-        <span className="text-slate-400 text-sm tabular-nums">{open ? '▾' : '◂'}</span>
-        <div className="flex-1">
-          <h3 className="font-semibold text-slate-800 flex items-center justify-end gap-2">
-            {icon && <span aria-hidden>{icon}</span>}
-            {title}
-          </h3>
-          {subtitle && <p className="text-xs app-text-muted mt-0.5">{subtitle}</p>}
-        </div>
-      </button>
-      {open && <div className="px-5 pb-5 pt-1 border-t border-slate-100 space-y-4">{children}</div>}
-    </section>
-  );
-};
-
-const DisplayPreferencesPanel: React.FC<{
-  settings: TaxiSettings;
-  onChange: (s: TaxiSettings) => void;
-  compact?: boolean;
-}> = ({ settings, onChange, compact = false }) => {
-  const themes: { id: DisplayThemeOption; icon: string; label: string }[] = [
-    { id: 'default', icon: '☀', label: DISPLAY_THEME_LABELS.default },
-    { id: 'comfort', icon: '🌿', label: DISPLAY_THEME_LABELS.comfort },
-    { id: 'dark', icon: '🌙', label: DISPLAY_THEME_LABELS.dark },
-    { id: 'contrast', icon: '◐', label: DISPLAY_THEME_LABELS.contrast },
-  ];
-
-  const sizes: FontSizeOption[] = ['normal', 'large', 'xlarge'];
-
-  return (
-    <div className={compact ? 'space-y-4' : 'space-y-5'}>
-      <div>
-        <p className="text-sm font-medium text-slate-700 mb-2">مظهر الألوان</p>
-        <div className="theme-pill w-full flex justify-center sm:justify-start">
-          {themes.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              title={t.label}
-              aria-pressed={settings.displayTheme === t.id}
-              aria-label={t.label}
-              onClick={() => onChange({ ...settings, displayTheme: t.id })}
-            >
-              {t.icon}
-            </button>
-          ))}
-        </div>
-        <p className="text-xs app-text-muted mt-2 text-center sm:text-right">
-          {DISPLAY_THEME_LABELS[settings.displayTheme ?? 'default']}
-        </p>
-      </div>
-
-      <div>
-        <p className="text-sm font-medium text-slate-700 mb-2">حجم النص والأرقام</p>
-        <div className="font-size-grid">
-          {sizes.map((size) => (
-            <button
-              key={size}
-              type="button"
-              className="font-size-card"
-              aria-pressed={settings.fontSize === size}
-              onClick={() => onChange({ ...settings, fontSize: size })}
-            >
-              <div className={`preview ${size}`}>750</div>
-              <div className="text-xs font-medium text-slate-600">{FONT_SIZE_LABELS[size]}</div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-slate-100 overflow-hidden px-4 app-surface-muted">
-        <SettingsToggle
-          label="تكبير أزرار الأداة"
-          hint="أزرار أكبر للمس على الجوال واللابتوب"
-          checked={settings.largeButtons ?? false}
-          onChange={(largeButtons) => onChange({ ...settings, largeButtons })}
-        />
-        <SettingsToggle
-          label="أرقام أوضح"
-          hint="جعل المبالغ والأرقام بخط عريض"
-          checked={settings.boldNumbers ?? false}
-          onChange={(boldNumbers) => onChange({ ...settings, boldNumbers })}
-        />
-        <SettingsToggle
-          label="تجربة قراءة مريحة"
-          hint="تباعد أسطر أوسع في الجداول والنصوص"
-          checked={settings.comfortableReading ?? false}
-          onChange={(comfortableReading) => onChange({ ...settings, comfortableReading })}
-        />
-      </div>
-
-      {!compact && (
-        <div className="display-preview-box">
-          <p className="text-xs app-text-muted mb-2">معاينة مباشرة</p>
-          <p className="font-semibold text-slate-800">VIP limousine CARS — 05/2026</p>
-          <p className="tabular-nums text-green-700 font-semibold mt-1">إيراد: {fmt(750)} د.أ</p>
-          <p className="tabular-nums text-orange-700 mt-0.5">مصاريف: {fmt(120)} د.أ</p>
-        </div>
-      )}
-    </div>
-  );
-};
-
 /* ——— Settings ——— */
 
 const SettingsTab: React.FC<{
   settings: TaxiSettings;
   entryCount: number;
+  session: UserSession;
   onOpenOilTab: () => void;
   onChange: (s: TaxiSettings) => void;
+  onImageChange: (image: string) => void;
   onExportBackup: () => void;
   onImportBackup: (file: File) => void;
   backupInputRef: React.RefObject<HTMLInputElement | null>;
@@ -3826,11 +4364,18 @@ const SettingsTab: React.FC<{
   onExportPdf: () => void;
   onBack: () => void;
   lang: UiLanguage;
+  vehicleId: string;
+  assignedUserId?: string | null;
+  assignedUserDisplayName?: string | null;
+  onVehicleReassigned: () => void;
+  onDeletionReviewed: (req: DeletionRequestRecord) => void;
 }> = ({
   settings,
   entryCount,
+  session,
   onOpenOilTab,
   onChange,
+  onImageChange,
   onExportBackup,
   onImportBackup,
   backupInputRef,
@@ -3842,6 +4387,11 @@ const SettingsTab: React.FC<{
   onExportPdf,
   onBack,
   lang,
+  vehicleId,
+  assignedUserId,
+  assignedUserDisplayName,
+  onVehicleReassigned,
+  onDeletionReviewed,
 }) => (
   <div className="max-w-3xl space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -3878,7 +4428,35 @@ const SettingsTab: React.FC<{
       )}
     </div>
 
+    {canReassignVehicle(session) && vehicleId && (
+      <SettingsSection
+        title={lang === 'ar' ? 'تعيين المستخدم' : 'User assignment'}
+        subtitle={
+          lang === 'ar' ? 'من يرى هذه السيارة في مرآبه' : 'Who sees this car in their garage'
+        }
+        icon="👤"
+      >
+        <VehicleAssignmentSettings
+          vehicleId={vehicleId}
+          assignedUserId={assignedUserId}
+          assignedUserDisplayName={assignedUserDisplayName}
+          lang={lang}
+          onReassigned={onVehicleReassigned}
+        />
+      </SettingsSection>
+    )}
+
     <SettingsSection title="إعدادات العمل" subtitle="الضمان، السائق، واسم السيارة" icon="🚕">
+      <div className="mb-4 pb-4 border-b border-slate-100">
+        <p className="text-sm font-medium text-slate-600 mb-2">
+          صورة السيارة <span className="text-red-600">*</span>
+        </p>
+        <VehicleImageSettingsField
+          vehicleImage={settings.vehicleImage}
+          onImageChange={onImageChange}
+          lang={lang}
+        />
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <label className="block sm:col-span-2">
           <span className="text-sm font-medium text-slate-600">قيمة الضمان الشهري (د.أ)</span>
@@ -3922,9 +4500,6 @@ const SettingsTab: React.FC<{
             onChange={(e) => onChange({ ...settings, vehicleLabel: e.target.value })}
             className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 app-surface"
           />
-          <p className="text-xs app-text-muted mt-1">
-            صورة السيارة إجباري — اضغط المربع بجانب الاسم في أعلى الصفحة لرفعها أو تغييرها
-          </p>
         </label>
       </div>
       <p className="text-xs app-text-muted">
@@ -4011,6 +4586,33 @@ const SettingsTab: React.FC<{
       </p>
     </SettingsSection>
 
+    {canReviewDeletions(session) && (
+      <SettingsSection
+        title={lang === 'ar' ? 'موافقات الحذف' : 'Deletion approvals'}
+        subtitle={
+          lang === 'ar'
+            ? 'طلبات الحذف من المستخدمين'
+            : 'Deletion requests from users'
+        }
+        icon="🛡️"
+      >
+        <DeletionApprovalsPanel
+          lang={lang}
+          onReviewed={onDeletionReviewed}
+        />
+      </SettingsSection>
+    )}
+
+    {canManageUsers(session) && (
+      <SettingsSection
+        title={lang === 'ar' ? 'المستخدمون والصلاحيات' : 'Users & permissions'}
+        subtitle={lang === 'ar' ? 'حسابات الفريق — مدير النظام' : 'Team accounts — system admin'}
+        icon="👥"
+      >
+        <UsersAdminPanel session={session} lang={lang} />
+      </SettingsSection>
+    )}
+
     <SettingsSection title="الحفظ والنسخ الاحتياطي" subtitle="PostgreSQL والملفات الاحتياطية" icon="💾">
       <p className="text-xs text-green-700 bg-green-50 border border-green-100 rounded-lg p-3">
         {storageSource === 'sql'
@@ -4064,24 +4666,29 @@ const SettingsTab: React.FC<{
           e.target.value = '';
         }}
       />
-      <button
-        type="button"
-        onClick={() => backupInputRef.current?.click()}
-        className="w-full py-2.5 rounded-lg border border-slate-300 text-slate-800 text-sm font-medium hover:bg-slate-50"
-      >
-        استيراد نسخة احتياطية (JSON)
-      </button>
-      {entryCount > 0 && (
+      {canImportBackup(session) && (
+        <button
+          type="button"
+          onClick={() => backupInputRef.current?.click()}
+          className="w-full py-2.5 rounded-lg border border-slate-300 text-slate-800 text-sm font-medium hover:bg-slate-50"
+        >
+          {lang === 'ar' ? 'استيراد نسخة احتياطية (JSON)' : 'Import backup (JSON)'}
+        </button>
+      )}
+      {entryCount > 0 && canClearAllEntries(session) && (
         <div className="space-y-2 pt-2 border-t border-red-100">
           <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg p-3">
-            ⚠ حذف السجلات الشهرية <strong>نهائي</strong>. يُطلب تأكيد مزدوج قبل التنفيذ.
+            ⚠{' '}
+            {lang === 'ar'
+              ? 'حذف السجلات الشهرية نهائي. يُطلب تأكيد مزدوج قبل التنفيذ.'
+              : 'Deleting monthly entries is permanent. Double confirmation required.'}
           </p>
           <button
             type="button"
             onClick={onClearEntries}
             className="w-full py-2.5 rounded-lg border-2 border-red-300 text-red-700 text-sm font-semibold hover:bg-red-50"
           >
-            حذف كل السجلات الشهرية
+            {lang === 'ar' ? 'حذف كل السجلات الشهرية' : 'Delete all monthly entries'}
           </button>
         </div>
       )}
@@ -4178,7 +4785,7 @@ const RoiSection: React.FC<{ roi: RoiAnalysis; settings: TaxiSettings }> = ({
             </div>
           </div>
 
-          <div className="h-64 w-full">
+          <div className="chart-panel w-full">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={chartPoints} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -4499,7 +5106,7 @@ const DashboardTab: React.FC<{
           <h3 className="font-semibold text-slate-800">الإيراد مقابل المصاريف</h3>
           {chartCaption && <p className="text-xs text-slate-500">{chartCaption}</p>}
         </div>
-        <div className="h-72 w-full">
+        <div className="chart-panel w-full">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />

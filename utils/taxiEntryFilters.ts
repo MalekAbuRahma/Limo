@@ -1,7 +1,11 @@
 import { EXPENSE_FIELD_LABELS, REPORT_EXPENSE_KEYS, ExpenseBreakdown } from '../taxiTypes';
 import { EntryComputed } from './taxiCalculations';
 
-export const TRACKING_PAGE_SIZE = 24;
+/** Fallback when viewport size is not computed yet */
+export const TRACKING_PAGE_SIZE = 8;
+
+/** Insurance / licenses / oil tables — few rows per screen */
+export const LIST_TABLE_PAGE_SIZE = 6;
 
 export type StatusFilter = 'all' | 'مكتمل' | 'غير مكتمل';
 

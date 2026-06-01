@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { DisplayThemeOption, TaxiSettings } from '../taxiTypes';
 import type { UserSession } from '../utils/taxiAuth';
+import { roleLabel } from '../utils/permissions';
 import type { UiLanguage } from './TaxiLogin';
 
 interface ProfileMenuProps {
@@ -114,7 +115,9 @@ const ProfileMenu: React.FC<ProfileMenuProps> = ({
           </svg>
         </div>
         <p className="profile-menu-header-name">{session.displayName}</p>
-        <p className="profile-menu-header-id tabular-nums">{session.userId}</p>
+        <p className="profile-menu-header-id text-xs opacity-80">
+          @{session.username} · {roleLabel(session.role, lang)}
+        </p>
       </div>
 
       <div className="profile-menu-rows">

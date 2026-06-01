@@ -17,6 +17,9 @@ dist-ssr
 .env
 deploy/.env.deploy
 
+# VPS credentials for Cursor agents (local only)
+.cursor/rules/server-deployment.mdc
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

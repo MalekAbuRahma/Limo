@@ -1,0 +1,82 @@
+---
+description: Professional clean code — DRY, structure, performance, maintainability
+alwaysApply: true
+---
+
+# Clean Code & Performance (FleetFlow)
+
+## Architecture — single source of truth
+
+| Layer | Location | Responsibility |
+|-------|----------|----------------|
+| Types & constants | `taxiTypes.ts` | Shapes, labels, defaults |
+| Business logic | `utils/*.ts` | Calculations, filters, permissions, persistence |
+| API / DB | `server/` | Auth, validation, SQL, routes |
+| UI | `components/` | Render, local UI state, wire utils — **no duplicated math** |
+
+Before writing new logic, search `utils/` and `server/` for an existing function. Extend it instead of copying.
+
+## DRY — do not duplicate
+
+- **Forbidden**: same formula, filter, or API call in two components.
+- **Extract** when used twice: pure helpers → `utils/`; shared UI → small components (`AppModal`, `ConfirmDialog` pattern).
+- **Config once**: labels and keys from `taxiTypes.ts` / `EXPENSE_FIELD_LABELS` — never hardcode parallel string maps in JSX.
+- **API**: use `utils/taxiApi.ts`, `authApi.ts`, `taxiFleetPersistence.ts` — one fetch/save path per resource.
+
+```typescript
+// ❌ BAD — dashboard math in component
+const net = revenue - Object.values(expenses).reduce((a, b) => a + b, 0);
+
+// ✅ GOOD
+const totals = computeDashboard(entries, settings);
+```
+
+## File size & components
+
+- Keep components focused. If a file exceeds ~400 lines, extract tabs, tables, or modals into `components/`.
+- Prefer **functional components** + hooks (`useFitPageSize`, `useLockBodyScroll`) over class components.
+- Colocate small helpers only when used in one file; move to `utils/` when reused.
+
+## React performance
+
+- **Memoize expensive work**: `useMemo` for `computeDashboard`, filtered/sorted lists, chart data.
+- **Stable callbacks**: `useCallback` for handlers passed to memoized children or large lists.
+- **Avoid render churn**: do not create new object/array literals in JSX props every render when child re-renders matter.
+- **Lists**: stable `key` (id, not index); paginate (`paginateEntries`, `TRACKING_PAGE_SIZE`) — never render thousands of rows.
+- **Lazy load**: heavy routes/screens via `React.lazy` (see `App.tsx`).
+- **Images**: use `vehicleImage` utils; avoid huge base64 in state — compress before save.
+- **Saves**: use `scheduleSaveVehicleState` debouncing — do not sync full state on every keystroke.
+
+## TypeScript quality
+
+- Export types from the module that owns the domain (`UserSession` in `taxiAuth.ts`).
+- Prefer `interface` for object shapes; use unions for finite states (`'pending' | 'approved'`).
+- No `any` for new code. Use `unknown` + narrow, or generics.
+- Return typed results from API helpers (`LoginApiResult`, `FleetFetchResult`).
+
+## Functions & naming
+
+- **Pure functions** in `utils/`: no side effects; easy to test in `scripts/test-*.mjs`.
+- Names: verbs for actions (`loadFleet`, `filterEntries`), nouns for data (`DashboardTotals`).
+- Early returns over deep nesting. Max ~3 levels of indentation in new code.
+
+## Error handling & boundaries
+
+- API: validate input, return clear HTTP status + message; log server-side, never leak stack to client.
+- UI: user-visible errors in Arabic/English per existing patterns; do not fail silently.
+- Async: `try/catch` on fetch; handle `null` / empty fleet without crashing.
+
+## Imports & dependencies
+
+- Group: React → third-party → `../utils` → `../components` → types.
+- Do not add npm packages unless necessary; prefer existing stack (Vite, Express, pg, recharts).
+- No dead code, commented-out blocks, or `console.log` left in production paths.
+
+## Refactor checklist (before finishing)
+
+- [ ] No duplicated logic — shared code lives in `utils/` or `server/`
+- [ ] Types accurate; no new `any`
+- [ ] Lists paginated or virtualized where large
+- [ ] Saves debounced; no redundant API calls
+- [ ] Matches naming and patterns in neighboring files
+- [ ] Tests updated (`test-cases-maintenance.mdc`)

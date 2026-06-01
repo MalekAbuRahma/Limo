@@ -1,0 +1,49 @@
+---
+description: Run full test journey before any deploy or production release
+alwaysApply: true
+---
+
+# Pre-Deploy Quality Gate
+
+**No deploy, push, or production release until the full test journey passes.**
+
+## Mandatory command
+
+From `fleetflow---car-rental-&-finance-dashboard/`:
+
+```bash
+npm run test:all
+```
+
+This runs (in order, stops on first failure):
+
+1. Calculations — `test-calculations.mjs`
+2. Sample data — `test-sample-data.mjs`
+3. Filters / pagination — `test-entry-filters.mjs`
+4. Integration — `test-integration.mjs`
+5. Fleet / multi-car — `test-fleet.mjs`
+6. Oil change — `test-oil-change.mjs`
+7. Production build — `vite build`
+
+Exit code must be `0`. Message `All tests passed + build OK` must appear.
+
+## Before deploy, also verify
+
+- [ ] `npm run test:all` passed in this session (agent must run it, not assume).
+- [ ] No secrets in commits (`.env`, credentials).
+- [ ] DB migrations (`db:migrate`, `db:init`) tested if schema changed.
+- [ ] Deploy scripts (`deploy/`, `db:push`, `users:push`) only run after tests pass (see `deploy-quality-gate.mdc`).
+
+## If tests fail
+
+1. Fix application or test code — do not skip steps in `test-all.mjs`.
+2. Re-run `npm run test:all` until green.
+3. Only then proceed with `build`, `db:push`, server restart, or hosting deploy.
+
+## Agent workflow summary
+
+```
+Change code → update test scripts → npm run test:<area> → npm run test:all → deploy
+```
+
+Treat a failed quality gate as a **blocker**; do not suggest deploy workarounds.

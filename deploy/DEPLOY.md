@@ -37,6 +37,26 @@ docker compose -f docker-compose.prod.yml ps
 curl -s http://127.0.0.1/api/health
 ```
 
+## Push users to the server
+
+Syncs accounts from `.env` (`ENSURE_ADMIN`, `ENSURE_USERS`) plus **malek** (app default):
+
+```powershell
+$env:DEPLOY_SSH_PASSWORD='your-root-password'
+npm run users:push
+```
+
+Logins after sync: `admin` / `1234`, `malek` / `1234`, `saleh` / `1234`.
+
+## Push local SQLite data to the server
+
+Your local `data/taxi.db` is uploaded and migrated into production PostgreSQL:
+
+```powershell
+$env:DEPLOY_SSH_PASSWORD='your-root-password'
+npm run db:push
+```
+
 ## Operations
 
 ```bash

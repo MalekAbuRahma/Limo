@@ -204,6 +204,17 @@ export interface VehicleListItem {
   netProfit: number;
   /** تسوية الشهر الحالي + ترخيص السيارة */
   cardProperties: VehicleCardProperty[];
+  /** المستخدم المسؤول عن هذه السيارة */
+  assignedUserId?: string | null;
+  assignedUserDisplayName?: string | null;
+  assignedUsername?: string | null;
+}
+
+export interface AssignableUser {
+  id: string;
+  username: string;
+  displayName: string;
+  role: 'admin' | 'user';
 }
 
 export interface FleetData {
@@ -221,6 +232,8 @@ export interface VehicleCreateInput {
   currentDriverName?: string;
   vehicleCost?: number;
   vehicleLifeYears?: number;
+  /** المستخدم المسؤول — إجباري عند الإنشاء */
+  assignedUserId: string;
 }
 
 export const DEFAULT_SETTINGS: TaxiSettings = {

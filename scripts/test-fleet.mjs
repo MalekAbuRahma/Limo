@@ -14,6 +14,7 @@ import {
   deleteVehicle,
   resetDbForTests,
 } from '../server/db.js';
+import { findUserByUsername } from '../server/auth.js';
 import { migrateEntry } from '../utils/taxiStorage.ts';
 import { computeFullVehicleTotals } from '../utils/taxiVehicleTotals.ts';
 
@@ -39,6 +40,9 @@ try {
   }
   assert(imageRequired, 'create rejects empty vehicle image');
 
+  const adminUser = await findUserByUsername('admin');
+  assert(adminUser?.id, 'seeded admin user exists');
+
   const car2Id = await createVehicle({
     label: 'Mercedes S-Class',
     vehicleImage: TEST_VEHICLE_IMAGE,
@@ -46,6 +50,7 @@ try {
     vehicleCost: 45000,
     vehicleLifeYears: 5,
     currentDriverName: 'Malek',
+    assignedUserId: adminUser.id,
   });
   assert(car2Id && car2Id !== defaultId, 'create second vehicle');
   const createdSettings = (await getVehicleState(car2Id)).settings;

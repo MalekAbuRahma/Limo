@@ -1,4 +1,3 @@
-import ExcelJS from 'exceljs';
 import {
   EXPENSE_FIELD_LABELS,
   REPORT_EXPENSE_KEYS,
@@ -27,6 +26,7 @@ export async function exportTaxiToExcel(
   totals: DashboardTotals,
   roi: RoiAnalysis
 ): Promise<void> {
+  const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Taxi Tracker';
 
@@ -231,8 +231,7 @@ export function exportTaxiToPdf(
 
   const win = window.open('', '_blank');
   if (!win) {
-    alert('يرجى السماح بالنوافذ المنبثقة لتصدير PDF');
-    return;
+    throw new Error('POPUP_BLOCKED');
   }
   win.document.write(html);
   win.document.close();

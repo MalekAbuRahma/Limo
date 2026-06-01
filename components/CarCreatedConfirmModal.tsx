@@ -1,6 +1,7 @@
-import React, { useEffect, useId } from 'react';
+import React, { useId } from 'react';
 import type { VehicleCreateInput } from '../taxiTypes';
 import { formatInteger, formatNumber } from '../utils/taxiFormat';
+import AppModal, { AppModalBody, AppModalFooter, AppModalHeader } from './AppModal';
 
 const fmt = formatNumber;
 const fmtInt = formatInteger;
@@ -26,15 +27,6 @@ const CarCreatedConfirmModal: React.FC<CarCreatedConfirmModalProps> = ({
   const titleId = useId();
   const descId = useId();
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onStayInGarage();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open, onStayInGarage]);
-
   if (!open || !summary) return null;
 
   const rows: { label: string; value: string }[] = [
@@ -54,52 +46,50 @@ const CarCreatedConfirmModal: React.FC<CarCreatedConfirmModalProps> = ({
   }
 
   return (
-    <div
-      className="delete-car-modal-backdrop fixed inset-0 z-[110] flex items-center justify-center bg-black/45 p-4"
-      onClick={onStayInGarage}
-      role="dialog"
-      aria-modal="true"
+    <AppModal
+      open={open}
+      onClose={onStayInGarage}
+      size="md"
+      zIndex={110}
+      panelClassName="border border-green-200"
       aria-labelledby={titleId}
       aria-describedby={descId}
     >
-      <div
-        className="delete-car-modal-panel bg-white rounded-2xl shadow-xl max-w-md w-full border border-green-200 text-right"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="px-6 pt-6 pb-4 border-b border-green-100 bg-green-50/80 rounded-t-2xl">
-          <div className="flex items-start gap-3">
-            <span
-              className="shrink-0 w-11 h-11 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-xl font-bold"
-              aria-hidden
-            >
-              ✓
-            </span>
-            <div>
-              <h2 id={titleId} className="text-lg font-bold text-slate-900">
-                تم إنشاء السيارة بنجاح
-              </h2>
-              <p id={descId} className="text-sm text-slate-600 mt-1">
-                تم حفظ البيانات — ملخص السيارة الجديدة:
-              </p>
-            </div>
+      <AppModalHeader className="!bg-green-50/80 !border-green-100 rounded-t-2xl">
+        <div className="flex items-start gap-3">
+          <span
+            className="shrink-0 w-11 h-11 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-xl font-bold"
+            aria-hidden
+          >
+            ✓
+          </span>
+          <div>
+            <h2 id={titleId} className="text-lg font-bold text-slate-900">
+              تم إنشاء السيارة بنجاح
+            </h2>
+            <p id={descId} className="text-sm text-slate-600 mt-1">
+              تم حفظ البيانات — ملخص السيارة الجديدة:
+            </p>
           </div>
         </div>
+      </AppModalHeader>
 
-        <div className="px-6 py-5">
-          <dl className="car-created-summary space-y-3">
-            {rows.map((row) => (
-              <div
-                key={row.label}
-                className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-slate-100 pb-2 last:border-0 last:pb-0"
-              >
-                <dt className="text-sm text-slate-500">{row.label}</dt>
-                <dd className="text-sm font-semibold text-slate-900 tabular-nums">{row.value}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
+      <AppModalBody className="!pt-4">
+        <dl className="car-created-summary space-y-3">
+          {rows.map((row) => (
+            <div
+              key={row.label}
+              className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-slate-100 pb-2 last:border-0 last:pb-0"
+            >
+              <dt className="text-sm text-slate-500">{row.label}</dt>
+              <dd className="text-sm font-semibold text-slate-900 tabular-nums">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </AppModalBody>
 
-        <div className="px-6 pb-6 flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+      <AppModalFooter>
+        <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end pt-3">
           <button
             type="button"
             onClick={onStayInGarage}
@@ -115,8 +105,8 @@ const CarCreatedConfirmModal: React.FC<CarCreatedConfirmModalProps> = ({
             فتح السيارة للمتابعة
           </button>
         </div>
-      </div>
-    </div>
+      </AppModalFooter>
+    </AppModal>
   );
 };
 

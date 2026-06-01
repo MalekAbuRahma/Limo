@@ -1,12 +1,17 @@
-import React, { useRef, useState } from 'react';
-import type { VehicleCreateInput, VehicleListItem } from '../taxiTypes';
+import React, { useEffect, useRef, useState } from 'react';
+import type { AssignableUser, VehicleCreateInput, VehicleListItem } from '../taxiTypes';
 import { DEFAULT_SETTINGS } from '../taxiTypes';
+import { fetchAssignableUsers } from '../utils/authApi';
+import { canDeleteImmediately, isAdmin } from '../utils/permissions';
+import type { UserSession } from '../utils/taxiAuth';
 import { formatNumber, formatInteger } from '../utils/taxiFormat';
+import type { UiLanguage } from './TaxiLogin';
 import {
   fileToVehicleImageDataUrl,
   hasVehicleImage,
   VEHICLE_IMAGE_REQUIRED_MSG,
 } from '../utils/vehicleImage';
+import AppModal, { AppModalBody, AppModalFooter, AppModalHeader } from './AppModal';
 import CarCreatedConfirmModal, { type CarCreatedSummary } from './CarCreatedConfirmModal';
 import DeleteCarConfirmModal from './DeleteCarConfirmModal';
 
@@ -14,6 +19,8 @@ const fmt = formatNumber;
 const fmtInt = formatInteger;
 
 interface VehicleGarageProps {
+  session: UserSession;
+  lang: UiLanguage;
   vehicles: VehicleListItem[];
   onSelect: (vehicleId: string) => void;
   onAddVehicle: (input: VehicleCreateInput) => Promise<string>;
@@ -21,6 +28,8 @@ interface VehicleGarageProps {
 }
 
 const VehicleGarage: React.FC<VehicleGarageProps> = ({
+  session,
+  lang,
   vehicles,
   onSelect,
   onAddVehicle,
@@ -41,7 +50,24 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
   const [createdSummary, setCreatedSummary] = useState<CarCreatedSummary | null>(null);
   const [createdVehicleId, setCreatedVehicleId] = useState<string | null>(null);
   const [imageError, setImageError] = useState('');
+  const [addFormError, setAddFormError] = useState('');
+  const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
+  const [assignedUserId, setAssignedUserId] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const adminCreates = canDeleteImmediately(session);
+
+  useEffect(() => {
+    if (!showAdd) return;
+    void fetchAssignableUsers().then((users) => {
+      setAssignableUsers(users);
+      setAssignedUserId((prev) => {
+        if (prev) return prev;
+        if (!adminCreates) return session.id;
+        return users[0]?.id ?? '';
+      });
+    });
+  }, [showAdd, session.id, adminCreates]);
 
   const resetAddForm = () => {
     setNewLabel('');
@@ -52,6 +78,8 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
     setNewCost(DEFAULT_SETTINGS.vehicleCost);
     setNewLifeYears(DEFAULT_SETTINGS.vehicleLifeYears);
     setImageError('');
+    setAddFormError('');
+    setAssignedUserId(adminCreates ? '' : session.id);
   };
 
   const closeAddModal = () => {
@@ -70,6 +98,14 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
       return;
     }
 
+    const userId = adminCreates ? assignedUserId : session.id;
+    if (!userId) {
+      setAddFormError(
+        lang === 'ar' ? 'اختر المستخدم المسؤول عن السيارة' : 'Select the user for this vehicle'
+      );
+      return;
+    }
+
     const payload: VehicleCreateInput = {
       label,
       ownerName,
@@ -78,9 +114,11 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
       currentDriverName: newDriver.trim(),
       vehicleCost: newCost,
       vehicleLifeYears: newLifeYears,
+      assignedUserId: userId,
     };
 
     setAdding(true);
+    setAddFormError('');
     try {
       const id = await onAddVehicle(payload);
       setShowAdd(false);
@@ -88,7 +126,13 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
       setCreatedSummary({ ...payload, label, ownerName });
       setCreatedVehicleId(id);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'تعذّر إنشاء السيارة');
+      setAddFormError(
+        err instanceof Error
+          ? err.message
+          : lang === 'ar'
+            ? 'تعذّر إنشاء السيارة'
+            : 'Could not create vehicle'
+      );
     } finally {
       setAdding(false);
     }
@@ -110,8 +154,15 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
       const dataUrl = await fileToVehicleImageDataUrl(file);
       setNewImage(dataUrl);
       setImageError('');
+      if (fileRef.current) fileRef.current.value = '';
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'تعذّر رفع الصورة');
+      setImageError(
+        err instanceof Error
+          ? err.message
+          : lang === 'ar'
+            ? 'تعذّر رفع الصورة'
+            : 'Could not upload image'
+      );
     }
     if (fileRef.current) fileRef.current.value = '';
   };
@@ -133,7 +184,15 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
       const ok = await onDeleteVehicle(deleteTarget.id);
       if (ok) {
         setDeleteTarget(null);
-        setDeleteSuccessMessage('تم حذف بطاقة السيارة بنجاح.');
+        setDeleteSuccessMessage(
+          canDeleteImmediately(session)
+            ? lang === 'ar'
+              ? 'تم حذف بطاقة السيارة بنجاح.'
+              : 'Vehicle removed successfully.'
+            : lang === 'ar'
+              ? 'تم إرسال طلب الحذف — بانتظار موافقة المدير.'
+              : 'Deletion request sent — awaiting admin approval.'
+        );
         window.setTimeout(() => setDeleteSuccessMessage(null), 5000);
       }
     } finally {
@@ -142,52 +201,71 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
   };
 
   return (
-    <div className="vehicle-garage space-y-6">
+    <div className="vehicle-garage">
       {deleteSuccessMessage && (
         <div
-          className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 font-medium"
+          className="vehicle-garage-toast"
           role="status"
         >
           {deleteSuccessMessage}
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">أسطول VIP limousine CARS</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            اختر سيارة لعرض المتابعة والملخص والتأمين والترخيص — كل سيارة ببياناتها المستقلة
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setShowAdd(true)}
-          className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 shadow-sm shrink-0"
-        >
-          <span className="text-lg leading-none">+</span>
-          إضافة سيارة جديدة
-        </button>
-      </div>
-
-      {showAdd && (
-        <div
-          className="delete-car-modal-backdrop fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4 overflow-y-auto"
-          onClick={closeAddModal}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="add-car-title"
-        >
-          <form
-            onSubmit={(e) => void handleAdd(e)}
-            className="vehicle-garage-add-form app-surface border border-slate-200 rounded-2xl p-5 shadow-xl space-y-4 max-w-lg w-full my-4"
-            onClick={(e) => e.stopPropagation()}
+      <header className="vehicle-garage-header">
+        <div className="vehicle-garage-header__row">
+          <div className="vehicle-garage-header__text">
+            <h2 className="vehicle-garage-header__title">
+              {lang === 'ar' ? 'أسطول VIP limousine CARS' : 'VIP limousine CARS fleet'}
+            </h2>
+            <p className="vehicle-garage-header__subtitle">
+              {lang === 'ar'
+                ? 'اختر سيارة لعرض المتابعة والملخص والتأمين والترخيص — كل سيارة ببياناتها المستقلة'
+                : 'Select a vehicle for tracking, summary, insurance, and licenses — each car has its own data'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAdd(true)}
+            className="vehicle-garage-header__add"
           >
+            <span aria-hidden>+</span>
+            {lang === 'ar' ? 'إضافة سيارة' : 'Add vehicle'}
+          </button>
+        </div>
+      </header>
+
+      <AppModal
+        open={showAdd}
+        onClose={closeAddModal}
+        size="lg"
+        zIndex={100}
+        dir={lang === 'ar' ? 'rtl' : 'ltr'}
+        closeOnBackdrop={!adding}
+        panelClassName="vehicle-garage-add-form app-surface border border-slate-200"
+        aria-labelledby="add-car-title"
+      >
+        <form
+          className="flex flex-col min-h-0 overflow-hidden"
+          noValidate
+          onSubmit={(e) => void handleAdd(e)}
+        >
+          <AppModalHeader>
             <h3 id="add-car-title" className="font-semibold text-slate-800 text-lg">
               سيارة جديدة
             </h3>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-500 mt-1">
               كل سيارة لها إعداداتها الخاصة (ضمان، تكلفة، مدة شطب) — لا تؤثر على السيارات الأخرى
             </p>
+          </AppModalHeader>
+          <AppModalBody className="space-y-4 !pt-4">
+            {addFormError && (
+              <div
+                className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+                role="alert"
+              >
+                {addFormError}
+              </div>
+            )}
             <label className="block">
               <span className="text-sm text-slate-600">اسم السيارة</span>
               <input
@@ -212,6 +290,39 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
               />
               <p className="text-xs text-slate-500 mt-1">يظهر كوسم (Tag) على بطاقة السيارة</p>
             </label>
+            {adminCreates ? (
+              <label className="block">
+                <span className="text-sm text-slate-600">
+                  {lang === 'ar' ? 'المستخدم المسؤول' : 'Assigned user'}{' '}
+                  <span className="text-red-600">*</span>
+                </span>
+                <select
+                  value={assignedUserId}
+                  onChange={(e) => setAssignedUserId(e.target.value)}
+                  required
+                  className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="">
+                    {lang === 'ar' ? '— اختر مستخدماً —' : '— Select user —'}
+                  </option>
+                  {assignableUsers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.displayName} (@{u.username})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  {lang === 'ar'
+                    ? 'يرى هذا المستخدم السيارة فقط في مرآبه'
+                    : 'Only this user will see the car in their garage'}
+                </p>
+              </label>
+            ) : (
+              <div className="rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-sm text-green-900">
+                {lang === 'ar' ? 'تُسجَّل السيارة تحت حسابك:' : 'This car will be assigned to:'}{' '}
+                <strong>{session.displayName}</strong>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label className="block">
                 <span className="text-sm text-slate-600">الضمان الشهري (د.أ)</span>
@@ -280,16 +391,23 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
                   type="file"
                   accept="image/jpeg,image/png,image/webp,image/gif"
                   className="sr-only"
-                  required
+                  aria-hidden
+                  tabIndex={-1}
                   onChange={(e) => void handleImageFile(e.target.files?.[0])}
                 />
               </div>
               {imageError && <p className="text-xs text-red-600 mt-1">{imageError}</p>}
             </div>
-            <div className="flex gap-2 pt-2">
+          </AppModalBody>
+          <AppModalFooter>
+            <div className="flex gap-2 pt-3">
               <button
                 type="submit"
-                disabled={adding || !hasVehicleImage(newImage)}
+                disabled={
+                  adding ||
+                  !hasVehicleImage(newImage) ||
+                  (adminCreates && !assignedUserId)
+                }
                 className="flex-1 px-5 py-2.5 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-60"
               >
                 {adding ? 'جاري الإضافة...' : 'حفظ وإنشاء'}
@@ -303,23 +421,36 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
                 إلغاء
               </button>
             </div>
-          </form>
-        </div>
-      )}
+          </AppModalFooter>
+        </form>
+      </AppModal>
 
       {vehicles.length === 0 ? (
-        <div className="text-center py-16 app-surface border border-dashed border-slate-300 rounded-xl">
-          <p className="text-slate-600 mb-4">لا توجد سيارات بعد</p>
-          <button
-            type="button"
-            onClick={() => setShowAdd(true)}
-            className="px-5 py-2 bg-blue-600 text-white rounded-lg font-medium"
-          >
-            إضافة أول سيارة
-          </button>
+        <div className="vehicle-garage-empty">
+          <div className="vehicle-garage-empty__content">
+            {isAdmin(session) ? (
+              <>
+                <p className="vehicle-garage-empty__message">
+                  {lang === 'ar' ? 'لا توجد سيارات بعد' : 'No vehicles yet'}
+                </p>
+                <button type="button" onClick={() => setShowAdd(true)} className="vehicle-garage-header__add">
+                  {lang === 'ar' ? 'إضافة أول سيارة' : 'Add first vehicle'}
+                </button>
+              </>
+            ) : (
+              <p className="vehicle-garage-empty__message">
+                {lang === 'ar'
+                  ? 'لا توجد سيارات مسندة لحسابك. المدير يعيّن السيارات من الإعدادات ← المستخدمون، أو عند إضافة سيارة جديدة.'
+                  : 'No vehicles assigned to you. An admin assigns cars under Settings → Users, or when adding a new car.'}
+              </p>
+            )}
+          </div>
         </div>
       ) : (
-        <div className="vehicle-garage-grid">
+        <div
+          className="vehicle-garage-grid"
+          data-count={vehicles.length <= 2 ? String(vehicles.length) : 'many'}
+        >
           {vehicles.map((v) => (
             <article
               key={v.id}
@@ -355,6 +486,14 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
                       {v.ownerName}
                     </span>
                   )}
+                  {v.assignedUserDisplayName && (
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-800"
+                      title={lang === 'ar' ? 'المستخدم المسؤول' : 'Assigned user'}
+                    >
+                      {v.assignedUserDisplayName}
+                    </span>
+                  )}
                 </div>
                 {v.currentDriverName && (
                   <p className="text-xs text-slate-500 truncate">السائق: {v.currentDriverName}</p>
@@ -375,42 +514,36 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
                     ))}
                   </ul>
                 )}
-                <table className="vehicle-garage-card-stats-table" aria-label="ملخص السيارة">
-                  <thead>
-                    <tr>
-                      <th scope="col">صافي الربح</th>
-                      <th scope="col">إيرادات</th>
-                      <th scope="col">أشهر</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>
-                        <span
-                          className={`vehicle-garage-stat-value ${
-                            v.netProfit >= 0
-                              ? 'vehicle-garage-stat-value--profit'
-                              : 'vehicle-garage-stat-value--loss'
-                          }`}
-                        >
-                          <span className="tabular-nums">{fmt(v.netProfit)}</span>
-                          <span className="vehicle-garage-stat-currency">د.أ</span>
-                        </span>
-                      </td>
-                      <td>
-                        <span className="vehicle-garage-stat-value vehicle-garage-stat-value--revenue tabular-nums">
-                          {fmt(v.totalRevenue)}
-                        </span>
-                      </td>
-                      <td>
-                        <span className="vehicle-garage-stat-value vehicle-garage-stat-value--months tabular-nums">
-                          {fmtInt(v.entryCount)}
-                        </span>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-                <span className="vehicle-garage-card-open-btn">فتح للمتابعة</span>
+                <div className="vehicle-garage-card-stats" role="group" aria-label="ملخص السيارة">
+                  <div className="vehicle-garage-card-stat">
+                    <span className="vehicle-garage-card-stat__label">صافي الربح</span>
+                    <span
+                      className={`vehicle-garage-stat-value ${
+                        v.netProfit >= 0
+                          ? 'vehicle-garage-stat-value--profit'
+                          : 'vehicle-garage-stat-value--loss'
+                      }`}
+                    >
+                      <span className="tabular-nums">{fmt(v.netProfit)}</span>
+                      <span className="vehicle-garage-stat-currency">د.أ</span>
+                    </span>
+                  </div>
+                  <div className="vehicle-garage-card-stat">
+                    <span className="vehicle-garage-card-stat__label">إيرادات</span>
+                    <span className="vehicle-garage-stat-value vehicle-garage-stat-value--revenue tabular-nums">
+                      {fmt(v.totalRevenue)}
+                    </span>
+                  </div>
+                  <div className="vehicle-garage-card-stat">
+                    <span className="vehicle-garage-card-stat__label">أشهر</span>
+                    <span className="vehicle-garage-stat-value vehicle-garage-stat-value--months tabular-nums">
+                      {fmtInt(v.entryCount)}
+                    </span>
+                  </div>
+                </div>
+                <span className="vehicle-garage-card-open-btn">
+                  {lang === 'ar' ? 'فتح للمتابعة' : 'Open'}
+                </span>
               </div>
               {onDeleteVehicle && vehicles.length > 1 && (
                 <button

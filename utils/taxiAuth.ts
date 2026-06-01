@@ -1,40 +1,51 @@
+export type UserRole = 'admin' | 'user';
+
 export interface UserSession {
+  id: string;
   username: string;
   displayName: string;
-  userId: string;
+  role: UserRole;
+  token?: string;
   loggedInAt: number;
 }
 
 const SESSION_KEY = 'taxi_tracker_session';
-const USER_ID_KEY = 'taxi_tracker_user_id';
-
-export function getStoredUserId(): string {
-  let id = localStorage.getItem(USER_ID_KEY);
-  if (!id) {
-    id = String(1_000_000_000 + Math.floor(Math.random() * 900_000_000));
-    localStorage.setItem(USER_ID_KEY, id);
-  }
-  return id;
-}
 
 export function getSession(): UserSession | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as UserSession;
-    if (!parsed?.username || !parsed?.userId) return null;
+    if (!parsed?.username || !parsed?.id) return null;
+    if (!parsed.role) parsed.role = 'user';
     return parsed;
   } catch {
     return null;
   }
 }
 
-export function createSession(username: string): UserSession {
-  const displayName = username.trim() || 'مستخدم';
+export function sessionFromApiUser(
+  user: { id: string; username: string; displayName: string; role: UserRole },
+  token: string
+): UserSession {
   return {
-    username: displayName,
-    displayName,
-    userId: getStoredUserId(),
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    role: user.role,
+    token,
+    loggedInAt: Date.now(),
+  };
+}
+
+export function createOfflineSession(username: string, role: UserRole = 'user'): UserSession {
+  const name = username.trim() || 'مستخدم';
+  const key = name.toLowerCase();
+  return {
+    id: `offline-${key}`,
+    username: key,
+    displayName: name,
+    role,
     loggedInAt: Date.now(),
   };
 }
@@ -47,17 +58,21 @@ export function clearSession(): void {
   localStorage.removeItem(SESSION_KEY);
 }
 
-/** Client-side gate for single-user local app */
-export function validateLogin(username: string, password: string): boolean {
-  const u = username.trim();
-  if (!u) return false;
-  if (!password.trim()) return true;
-  const demoPairs: Record<string, string> = {
-    malek: '1234',
-    admin: 'admin',
-    مستخدم: '1234',
+/** Offline fallback when API is unavailable */
+export function validateOfflineLogin(username: string, password: string): UserRole | null {
+  const u = username.trim().toLowerCase();
+  if (!u) return null;
+  if (!password.trim()) return null;
+
+  const demoPairs: Record<string, { passwords: string[]; role: UserRole }> = {
+    admin: { passwords: ['admin', '1234'], role: 'admin' },
+    malek: { passwords: ['1234'], role: 'admin' },
+    saleh: { passwords: ['1234'], role: 'user' },
+    مستخدم: { passwords: ['1234'], role: 'user' },
   };
-  const expected = demoPairs[u.toLowerCase()];
-  if (expected) return password === expected;
-  return password.length >= 4;
+
+  const demo = demoPairs[u];
+  if (demo && demo.passwords.includes(password)) return demo.role;
+  if (password.length >= 4) return 'user';
+  return null;
 }

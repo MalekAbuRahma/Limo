@@ -44,45 +44,92 @@ export async function saveFleetGlobalSettings(global) {
   );
 }
 
-export async function listVehicles() {
-  const pool = getPool();
-  const { rows: vehicles } = await pool.query(
-    `SELECT * FROM vehicles ORDER BY sort_order ASC, created_at ASC`
-  );
+function groupByVehicleId(rows) {
+  const map = new Map();
+  for (const row of rows) {
+    const id = row.vehicle_id;
+    if (!map.has(id)) map.set(id, []);
+    map.get(id).push(row);
+  }
+  return map;
+}
 
-  const result = [];
+/** Fleet garage list — one vehicle query + batched related rows (not N× full state loads). */
+export async function listVehicles(actor = null) {
+  const pool = getPool();
+  const params = [];
+  let where = '';
+  if (actor && actor.role !== 'admin') {
+    where = 'WHERE v.assigned_user_id = $1';
+    params.push(actor.id);
+  }
+  const { rows: vehicles } = await pool.query(
+    `SELECT v.*, u.display_name AS assigned_user_display_name, u.username AS assigned_username
+     FROM vehicles v
+     LEFT JOIN users u ON u.id = v.assigned_user_id
+     ${where}
+     ORDER BY v.sort_order ASC, v.created_at ASC`,
+    params
+  );
+  if (!vehicles.length) return [];
+
+  const ids = vehicles.map((v) => v.id);
+  const [entriesRes, accidentsRes, licensesRes, oilRes] = await Promise.all([
+    pool.query(
+      `SELECT * FROM monthly_entries WHERE vehicle_id = ANY($1::text[]) ORDER BY date ASC`,
+      [ids]
+    ),
+    pool.query(
+      `SELECT * FROM accidents WHERE vehicle_id = ANY($1::text[]) ORDER BY accident_date ASC`,
+      [ids]
+    ),
+    pool.query(
+      `SELECT * FROM annual_licenses WHERE vehicle_id = ANY($1::text[]) ORDER BY license_date ASC`,
+      [ids]
+    ),
+    pool.query(
+      `SELECT * FROM oil_changes WHERE vehicle_id = ANY($1::text[]) ORDER BY change_date ASC`,
+      [ids]
+    ),
+  ]);
+
+  const entriesByVehicle = groupByVehicleId(entriesRes.rows);
+  const accidentsByVehicle = groupByVehicleId(accidentsRes.rows);
+  const licensesByVehicle = groupByVehicleId(licensesRes.rows);
+  const oilByVehicle = groupByVehicleId(oilRes.rows);
+
   const { computeFullVehicleTotals } = await import('../utils/taxiVehicleTotals.ts');
   const { computeVehicleCardProperties } = await import('../utils/vehicleGarageCard.ts');
 
-  for (const v of vehicles) {
+  return vehicles.map((v) => {
     const meta = rowToVehicleMeta(v);
-    const state = await buildVehicleState(meta.id);
-    if (!state) continue;
-
-    const guarantee = state.settings.monthlyGuarantee;
+    const guarantee = meta.monthlyGuarantee;
+    const entries = (entriesByVehicle.get(meta.id) ?? []).map(rowToEntry);
+    const accidents = (accidentsByVehicle.get(meta.id) ?? []).map(rowToAccident);
+    const licenses = (licensesByVehicle.get(meta.id) ?? []).map(rowToLicense);
+    const oilChanges = (oilByVehicle.get(meta.id) ?? []).map(rowToOilChange);
     const totals = computeFullVehicleTotals(
-      state.entries,
+      entries,
       guarantee,
-      state.accidents,
-      state.licenses,
-      state.oilChanges
+      accidents,
+      licenses,
+      oilChanges
     );
 
-    result.push({
+    return {
       ...meta,
-      entryCount: state.entries.length,
+      entryCount: entries.length,
       totalRevenue: totals.totalRevenue,
       totalExpenses: totals.totalExpenses,
       netProfit: totals.netProfit,
       cardProperties: computeVehicleCardProperties(
-        state.entries,
+        entries,
         guarantee,
-        state.licenses,
-        state.oilChanges
+        licenses,
+        oilChanges
       ),
-    });
-  }
-  return result;
+    };
+  });
 }
 
 export async function createVehicle({
@@ -94,6 +141,7 @@ export async function createVehicle({
   vehicleCost = 33000,
   vehicleLifeYears = 7,
   insuranceReceivedTotal = 0,
+  assignedUserId = null,
 }) {
   assertVehicleImage(vehicleImage);
   const pool = getPool();
@@ -105,8 +153,8 @@ export async function createVehicle({
   await pool.query(
     `INSERT INTO vehicles (
       id, label, vehicle_image, owner_name, monthly_guarantee, current_driver_name,
-      vehicle_cost, vehicle_life_years, insurance_received_total, sort_order, created_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())`,
+      vehicle_cost, vehicle_life_years, insurance_received_total, sort_order, assigned_user_id, created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
     [
       id,
       label?.trim() || 'سيارة جديدة',
@@ -118,9 +166,23 @@ export async function createVehicle({
       vehicleLifeYears ?? 7,
       insuranceReceivedTotal ?? 0,
       sortOrder,
+      assignedUserId,
     ]
   );
   return id;
+}
+
+export async function updateVehicleAssignment(vehicleId, assignedUserId) {
+  const pool = getPool();
+  const { rowCount } = await pool.query(
+    `UPDATE vehicles SET assigned_user_id = $1 WHERE id = $2`,
+    [assignedUserId, vehicleId]
+  );
+  if (rowCount === 0) {
+    const err = new Error('Vehicle not found');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
 }
 
 export async function deleteVehicle(vehicleId) {
@@ -318,9 +380,9 @@ export async function saveVehicleState(vehicleId, state) {
   });
 }
 
-export async function getFleet() {
+export async function getFleet(actor = null) {
   return {
     globalSettings: await getFleetGlobalSettings(),
-    vehicles: await listVehicles(),
+    vehicles: await listVehicles(actor),
   };
 }

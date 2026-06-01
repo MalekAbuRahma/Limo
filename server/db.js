@@ -13,9 +13,9 @@ export async function initDb() {
   await initSchema();
 }
 
-export async function getFleet() {
+export async function getFleet(actor) {
   const f = await fleet();
-  return f.getFleet();
+  return f.getFleet(actor);
 }
 
 export async function getVehicleState(vehicleId) {
@@ -42,6 +42,11 @@ export async function deleteVehicle(vehicleId) {
     throw new Error('Cannot delete the last vehicle');
   }
   await f.deleteVehicle(vehicleId);
+}
+
+export async function updateVehicleAssignment(vehicleId, assignedUserId) {
+  const f = await fleet();
+  await f.updateVehicleAssignment(vehicleId, assignedUserId);
 }
 
 export async function saveFleetGlobalSettings(global) {
@@ -84,6 +89,7 @@ export async function resetDbForTests() {
   const pool = getPool();
   await pool.query(`
     TRUNCATE TABLE
+      deletion_requests, auth_sessions, users,
       oil_changes, monthly_entries, accidents, annual_licenses, vehicles, fleet_settings
     RESTART IDENTITY CASCADE
   `);
