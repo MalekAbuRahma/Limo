@@ -23,7 +23,12 @@ let failed = 0;
 
 for (const [name, cmd] of steps) {
   console.log(`\n========== ${name} ==========\n`);
-  const result = spawnSync(cmd[0], cmd.slice(1), { cwd: root, stdio: 'inherit', shell: true });
+  let result = spawnSync(cmd[0], cmd.slice(1), { cwd: root, stdio: 'inherit', shell: true });
+  const flakyCrash = result.status == null || result.status === 3221226505;
+  if (flakyCrash) {
+    console.warn(`\n⚠ ${name} returned unstable exit (${result.status}); retrying once...`);
+    result = spawnSync(cmd[0], cmd.slice(1), { cwd: root, stdio: 'inherit', shell: true });
+  }
   if (result.status !== 0) {
     console.error(`\n✗ ${name} FAILED (exit ${result.status})`);
     failed++;

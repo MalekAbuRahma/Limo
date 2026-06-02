@@ -32,7 +32,6 @@ export const EXPENSE_FIELD_LABELS: Record<keyof ExpenseBreakdown, string> = {
 /** حقول المصاريف في نموذج المتابعة الشهرية — الزيت من تبويب «متابعة الزيت» */
 export const VISIBLE_EXPENSE_KEYS = [
   'maintenance',
-  'accident',
   'commission',
   'other',
 ] as const satisfies readonly (keyof ExpenseBreakdown)[];

@@ -400,7 +400,7 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
             </div>
           </AppModalBody>
           <AppModalFooter>
-            <div className="flex gap-2 pt-3">
+            <div className="flex flex-col-reverse sm:flex-row gap-2 pt-3 w-full">
               <button
                 type="submit"
                 disabled={
@@ -408,7 +408,7 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
                   !hasVehicleImage(newImage) ||
                   (adminCreates && !assignedUserId)
                 }
-                className="flex-1 px-5 py-2.5 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-60"
+                className="w-full sm:flex-1 px-5 py-2.5 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-60 min-h-[48px] sm:min-h-0"
               >
                 {adding ? 'جاري الإضافة...' : 'حفظ وإنشاء'}
               </button>
@@ -416,7 +416,7 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
                 type="button"
                 onClick={closeAddModal}
                 disabled={adding}
-                className="px-4 py-2.5 text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-60"
+                className="w-full sm:w-auto px-4 py-2.5 text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-60 min-h-[44px] sm:min-h-0"
               >
                 إلغاء
               </button>

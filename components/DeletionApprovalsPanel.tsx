@@ -193,9 +193,15 @@ export const DeletionApprovalsButton: React.FC<{
           setOpen(true);
           onRefreshCount();
         }}
-        className="relative inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+        className="deletion-approvals-btn relative inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 min-h-[40px]"
+        aria-label={lang === 'ar' ? 'موافقات الحذف' : 'Deletion approvals'}
       >
-        {lang === 'ar' ? 'موافقات الحذف' : 'Deletions'}
+        <span className="deletion-approvals-btn__label hidden sm:inline">
+          {lang === 'ar' ? 'موافقات الحذف' : 'Deletions'}
+        </span>
+        <span className="sm:hidden" aria-hidden>
+          🗑
+        </span>
         {pendingCount > 0 && (
           <span className="absolute -top-1.5 -end-1.5 min-w-[1.25rem] h-5 px-1 flex items-center justify-center rounded-full bg-red-600 text-white text-[10px] font-bold tabular-nums">
             {pendingCount > 99 ? '99+' : pendingCount}
@@ -204,13 +210,13 @@ export const DeletionApprovalsButton: React.FC<{
       </button>
       {open && (
         <div
-          className="fixed inset-0 z-[300] flex items-start justify-center p-4 bg-black/40"
+          className="deletion-approvals-overlay fixed inset-0 z-[300] flex items-end sm:items-start justify-center p-0 sm:p-4 bg-black/40"
           role="dialog"
           aria-modal
           onClick={() => setOpen(false)}
         >
           <div
-            className="w-full max-w-lg max-h-[85vh] overflow-auto bg-white rounded-2xl shadow-xl mt-8"
+            className="deletion-approvals-sheet w-full sm:max-w-lg max-h-[92dvh] sm:max-h-[85vh] overflow-auto bg-white rounded-t-2xl sm:rounded-2xl shadow-xl sm:mt-8"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex justify-between items-center">

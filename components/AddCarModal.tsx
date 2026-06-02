@@ -104,7 +104,7 @@ const AddCarModal: React.FC<AddCarModalProps> = ({ lang, onSave, onClose }) => {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="add-car-rent" className={labelBase}>{t.initialRent}</label>
                 <input
@@ -135,7 +135,7 @@ const AddCarModal: React.FC<AddCarModalProps> = ({ lang, onSave, onClose }) => {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="add-car-date" className={labelBase}>{t.startDate}</label>
                 <input

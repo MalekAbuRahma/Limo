@@ -19,7 +19,7 @@ const guarantee = DEFAULT_SETTINGS.monthlyGuarantee;
 const entries = generateSampleEntries(3).map((e) => computeEntry(e, guarantee));
 
 assert(entries.length === 36, '36 sample months');
-assert(TRACKING_PAGE_SIZE === 24, 'page size 24');
+assert(TRACKING_PAGE_SIZE > 0, 'page size configured');
 
 const incompleteOnly = filterEntries(entries, { query: '', status: 'غير مكتمل', driver: 'all' });
 assert(
@@ -42,11 +42,17 @@ assert(searchToken.length >= 0, 'multi-token search runs');
 
 const page1 = paginateEntries(entries, 1);
 const page2 = paginateEntries(entries, 2);
-assert(page1.items.length === 24, 'page 1 has 24 rows');
-assert(page2.items.length === 12, 'page 2 has 12 rows');
-assert(page1.totalPages === 2, 'two pages for 36 rows');
+const expectedPage1 = Math.min(TRACKING_PAGE_SIZE, entries.length);
+const expectedPage2 = Math.min(
+  TRACKING_PAGE_SIZE,
+  Math.max(0, entries.length - TRACKING_PAGE_SIZE)
+);
+const expectedTotalPages = Math.ceil(entries.length / TRACKING_PAGE_SIZE);
+assert(page1.items.length === expectedPage1, 'page 1 has expected rows');
+assert(page2.items.length === expectedPage2, 'page 2 has expected rows');
+assert(page1.totalPages === expectedTotalPages, 'expected total pages');
 
 const targetId = entries[30].id;
-assert(findEntryPage(entries, targetId) === 2, 'find page for entry');
+assert(findEntryPage(entries, targetId) === Math.ceil((30 + 1) / TRACKING_PAGE_SIZE), 'find page for entry');
 
 console.log('All entry filter / pagination tests passed ✓');

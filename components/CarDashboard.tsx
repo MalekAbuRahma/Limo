@@ -666,7 +666,7 @@ const CarDashboard: React.FC<CarDashboardProps> = ({ car, onUpdate, onBack, lang
                 </button>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-6 p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 p-6">
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-6">
                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">{t.purchasePrice}</p>
                 <p className="text-2xl font-semibold text-slate-900 tabular-nums">{car.purchaseCost.toLocaleString()} {t.currency}</p>

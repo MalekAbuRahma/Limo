@@ -108,10 +108,16 @@ const TaxiLogin: React.FC<TaxiLoginProps> = ({ onLogin, lang, setLang }) => {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center bg-slate-100 px-4 py-12"
+      className="login-page min-h-[100dvh] flex items-center justify-center bg-slate-100 px-4 py-8 sm:py-12"
       dir={isRtl ? 'rtl' : 'ltr'}
     >
-      <div className={`absolute top-6 z-10 flex gap-2 ${isRtl ? 'left-6' : 'right-6'}`}>
+      <div
+        className={`login-page__lang absolute z-10 flex gap-2 top-[max(1rem,env(safe-area-inset-top))] ${
+          isRtl
+            ? 'start-[max(1rem,env(safe-area-inset-left))]'
+            : 'end-[max(1rem,env(safe-area-inset-right))]'
+        }`}
+      >
         <button
           type="button"
           onClick={() => setLang('en')}

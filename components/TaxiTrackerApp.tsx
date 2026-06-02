@@ -132,7 +132,6 @@ import {
   computeEntry,
   computeRoiAnalysis,
   formatMonthLabel,
-  formatMonthNumber,
   monthKey,
   sumExpenses,
   normalizeExpenseDetails,
@@ -600,7 +599,6 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
   }, [state, isLoading, vehicleLoading, selectedVehicleId]);
 
   const backupInputRef = useRef<HTMLInputElement>(null);
-  const [backupBannerDismissed, setBackupBannerDismissed] = useState(false);
   const [backupTick, setBackupTick] = useState(0);
 
   const backupStatus = useMemo(
@@ -772,12 +770,8 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
 
   const handleExportBackup = () => {
     exportBackupJson(state, settings.vehicleLabel || 'taxi');
-    setBackupBannerDismissed(true);
     setBackupTick((t) => t + 1);
   };
-
-  const showBackupReminder =
-    entries.length > 0 && backupStatus.isOverdue && !backupBannerDismissed;
 
   const handleImportBackup = async (file: File) => {
     if (!canImportBackup(session)) {
@@ -1491,40 +1485,6 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
           onConfirm={executeClearAllEntries}
         />
       )}
-      {showBackupReminder && (
-        <div className="app-layout__banner app-backup-strip">
-          <div className="max-w-6xl mx-auto px-3 py-1.5 flex items-center justify-between gap-2">
-            <p className="text-xs text-amber-900 truncate min-w-0">
-              <span className="font-semibold">نسخ احتياطي:</span>{' '}
-              {backupStatus.hasBackupBefore ? (
-                <>
-                  آخر نسخة قبل{' '}
-                  <span className="tabular-nums">{fmtInt(backupStatus.daysSinceBackup ?? 0)}</span> يوم
-                </>
-              ) : (
-                <>لم تُسجَّل نسخة بعد</>
-              )}
-            </p>
-            <div className="flex items-center gap-1 shrink-0">
-              <button
-                type="button"
-                onClick={handleExportBackup}
-                className="px-2.5 py-1 bg-amber-600 text-white text-xs font-medium rounded-md hover:bg-amber-700"
-              >
-                تصدير
-              </button>
-              <button
-                type="button"
-                onClick={() => setBackupBannerDismissed(true)}
-                className="px-2 py-1 text-amber-800 text-xs rounded-md hover:bg-amber-100"
-                aria-label="إخفاء التذكير"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       <header className="app-layout__header app-vehicle-header bg-white border-b border-slate-200 z-40">
         <div className="max-w-6xl mx-auto px-3 py-2">
           <div className="app-vehicle-header__row flex items-center justify-between gap-2">
@@ -2123,42 +2083,14 @@ const PaginationBar: React.FC<{
 
 const PaymentStatusControl: React.FC<{
   row: EntryComputed;
-  onSetComplete: (id: string, complete: boolean) => void;
-}> = ({ row, onSetComplete }) => {
-  const showMarkComplete = row.remaining > 0 && !row.paymentComplete;
-  const showMarkIncomplete = row.paymentComplete;
+}> = ({ row }) => {
+  const isComplete = row.remaining <= 0;
+  const statusLabel = isComplete ? 'مكتمل' : 'غير مكتمل';
+  const statusClass = paymentStatusBadgeClass(statusLabel);
 
   return (
     <div className="payment-status-control">
-      <span
-        className={`payment-status-control__badge ${paymentStatusBadgeClass(row.status)}`}
-      >
-        {row.status}
-      </span>
-      {showMarkComplete && (
-        <button
-          type="button"
-          className="payment-status-control__btn payment-status-control__btn--complete"
-          onClick={(e) => {
-            e.stopPropagation();
-            onSetComplete(row.id, true);
-          }}
-        >
-          مكتمل
-        </button>
-      )}
-      {showMarkIncomplete && (
-        <button
-          type="button"
-          className="payment-status-control__btn payment-status-control__btn--incomplete"
-          onClick={(e) => {
-            e.stopPropagation();
-            onSetComplete(row.id, false);
-          }}
-        >
-          غير مكتمل
-        </button>
-      )}
+      <span className={`payment-status-control__badge ${statusClass}`}>{statusLabel}</span>
     </div>
   );
 };
@@ -2210,7 +2142,7 @@ const TrackingEntryCard: React.FC<{
           <span className="tracking-entry-card__num tabular-nums">#{fmtInt(rowNum)}</span>
         </div>
         <div className="tracking-entry-card__badges">
-          <PaymentStatusControl row={row} onSetComplete={onSetPaymentComplete} />
+          <PaymentStatusControl row={row} />
           {row.driverName?.trim() && (
             <span className="tracking-entry-card__driver-chip" title="السائق">
               {row.driverName}
@@ -2260,10 +2192,10 @@ const TrackingEntryCard: React.FC<{
               className="tracking-entry-card__pay-btn"
               onClick={(e) => {
                 e.stopPropagation();
-                onRequestPayFull(row);
+                onOpenEdit(row);
               }}
             >
-              تسديد المبلغ
+              استكمال الضمان
             </button>
           )}
         </div>
@@ -2363,11 +2295,11 @@ const EntryActionsMenu: React.FC<{
           role="menuitem"
           className="tracking-row-menu__item tracking-row-menu__item--complete"
           onClick={() => {
-            onRequestPayFull(row);
+            onOpenEdit(row);
             setOpen(false);
           }}
         >
-          تسديد المبلغ
+          استكمال الضمان
         </button>
       )}
       <button
@@ -2569,7 +2501,7 @@ const TrackingEntriesTable: React.FC<{
                   {fmt(row.remaining)}
                 </td>
                 <td className="py-3 px-3">
-                  <PaymentStatusControl row={row} onSetComplete={onSetPaymentComplete} />
+                  <PaymentStatusControl row={row} />
                 </td>
                 <td className="py-3 px-2 align-middle tracking-table-actions-cell">
                   <EntryActionsMenu
@@ -2677,7 +2609,18 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
   }, [form.date, oilChanges, editingId]);
   const formExpenseTotal = sumExpenses({ ...expenseDetails, oil: 0 }) + monthOilFromTab;
   const previewNet = (form.revenue || 0) - formExpenseTotal;
-  const monthPickerValue = form.date ? form.date.slice(0, 7) : '';
+  const periodMatch = form.date?.match(/^(\d{4})-(\d{2})/);
+  const periodYear = periodMatch?.[1] ?? String(new Date().getFullYear());
+  const periodMonth = periodMatch?.[2] ?? String(new Date().getMonth() + 1).padStart(2, '0');
+  const periodYears = useMemo(() => {
+    const now = new Date().getFullYear();
+    const years: number[] = [];
+    for (let y = now - 10; y <= now + 2; y++) years.push(y);
+    return years;
+  }, []);
+  const setPeriod = (year: string, month: string) => {
+    onMonthPickerChange(`${year}-${month}`);
+  };
 
   const setExpenseField = (key: keyof ExpenseBreakdown, value: number) => {
     onFormChange((f) => {
@@ -2695,6 +2638,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
   const [entryPendingPayFull, setEntryPendingPayFull] = useState<EntryComputed | null>(null);
   const [viewMode, setViewMode] = useState<TrackingViewMode>(loadTrackingViewMode);
   const [sortOrder, setSortOrder] = useState<EntrySortOrder>(loadTrackingSortOrder);
+  const [showOptionalExpenses, setShowOptionalExpenses] = useState(false);
 
   const driverOptions = useMemo(() => getUniqueDriverNames(entries), [entries]);
 
@@ -2778,6 +2722,10 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
   useEffect(() => {
     setPage(1);
   }, [pageSize, viewMode]);
+
+  useEffect(() => {
+    if (showForm) setShowOptionalExpenses(false);
+  }, [showForm, editingId]);
 
   return (
     <div className="tracking-tab space-y-2 sm:space-y-3">
@@ -2877,36 +2825,48 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
               {formError}
             </div>
           )}
-          <div className="entry-form-meta grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <label className="block sm:col-span-2 lg:col-span-1">
+          <div className="entry-form-meta entry-form-section entry-form-section--meta grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <label className="block">
               <span className="text-xs font-medium text-slate-500">الشهر / السنة</span>
-              <input
-                type="month"
-                required
-                value={monthPickerValue}
-                onChange={(e) => onMonthPickerChange(e.target.value)}
-                className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm tabular-nums entry-touch-input"
-              />
+              <div className="entry-month-year-field mt-1">
+                <select
+                  required
+                  value={periodMonth}
+                  onChange={(e) => setPeriod(periodYear, e.target.value)}
+                  className="entry-month-year-field__part entry-touch-input tabular-nums"
+                  aria-label="الشهر"
+                >
+                  {Array.from({ length: 12 }, (_, i) => {
+                    const mm = String(i + 1).padStart(2, '0');
+                    return (
+                      <option key={mm} value={mm}>
+                        {mm}
+                      </option>
+                    );
+                  })}
+                </select>
+                <span className="entry-month-year-field__sep" aria-hidden>
+                  /
+                </span>
+                <select
+                  required
+                  value={periodYear}
+                  onChange={(e) => setPeriod(e.target.value, periodMonth)}
+                  className="entry-month-year-field__part entry-month-year-field__part--year entry-touch-input tabular-nums"
+                  aria-label="السنة"
+                >
+                  {periodYears.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p className="entry-month-year-field__hint text-xs text-slate-500 mt-1 tabular-nums">
+                {form.month || formatMonthLabel(form.date)}
+              </p>
             </label>
-            <label className="block entry-form-meta-extra hidden sm:block">
-              <span className="text-xs font-medium text-slate-500">رقم الشهر</span>
-              <input
-                type="text"
-                readOnly
-                value={formatMonthNumber(form.date)}
-                className="mt-1 w-full border border-slate-100 bg-slate-50 rounded-lg px-3 py-2 text-sm text-slate-600 tabular-nums text-center font-medium"
-              />
-            </label>
-            <label className="block entry-form-meta-extra hidden sm:block">
-              <span className="text-xs font-medium text-slate-500">الفترة (MM/YYYY)</span>
-              <input
-                type="text"
-                readOnly
-                value={form.month || formatMonthLabel(form.date)}
-                className="mt-1 w-full border border-slate-100 bg-slate-50 rounded-lg px-3 py-2 text-sm text-slate-600 tabular-nums"
-              />
-            </label>
-            <label className="block sm:col-span-2 lg:col-span-1">
+            <label className="block">
               <span className="text-xs font-medium text-slate-500">اسم السائق</span>
               <input
                 type="text"
@@ -2916,12 +2876,9 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                 className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm entry-touch-input"
               />
             </label>
-            <p className="entry-form-meta-mobile-hint sm:hidden text-xs text-slate-500 tabular-nums col-span-1">
-              الفترة: {form.month || formatMonthLabel(form.date)}
-            </p>
           </div>
 
-          <div className="entry-payments-card">
+          <div className="entry-payments-card entry-form-section entry-form-section--payments">
             <div className="entry-payments-card__head">
               <h3 className="text-sm font-semibold text-blue-900">دفعات السائق — ٣ دفعات ضمان</h3>
               <span className="text-xs sm:text-sm font-bold text-blue-800 tabular-nums">
@@ -3010,49 +2967,61 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
             </div>
           </div>
 
-          <div className="border border-orange-200 rounded-xl p-4 bg-orange-50/50 space-y-3">
+          <div className="entry-form-section entry-form-section--expenses border border-orange-200 rounded-xl p-4 bg-orange-50/50 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-orange-900">تفاصيل المصاريف (اختياري)</h3>
+              <button
+                type="button"
+                className="entry-expense-toggle"
+                onClick={() => setShowOptionalExpenses((v) => !v)}
+                aria-expanded={showOptionalExpenses}
+              >
+                <span>{showOptionalExpenses ? '▾' : '▸'}</span>
+                <span className="text-sm font-semibold text-orange-900">تفاصيل المصاريف (اختياري)</span>
+              </button>
               <span className="text-sm font-bold text-orange-800 tabular-nums">
                 المجموع: {fmt(formExpenseTotal)} د.أ
               </span>
             </div>
-            <p className="text-xs text-slate-500">يمكن الحفظ بدون مصاريف — اترك الحقول فارغة</p>
-            {monthOilFromTab > 0 && (
-              <p className="text-xs text-orange-800 tabular-nums">
-                يشمل زيت هذا الشهر من تبويب «متابعة الزيت»: {fmt(monthOilFromTab)} د.أ
-              </p>
-            )}
-            <div className="entry-expense-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {VISIBLE_EXPENSE_KEYS.map((key) => (
-                <label key={key} className="block">
-                  <span className="text-xs font-medium text-slate-600">
-                    {EXPENSE_FIELD_LABELS[key]} <span className="text-slate-400">(اختياري)</span>
-                  </span>
-                  <input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={expenseDetails[key] || ''}
-                    onChange={(e) => setExpenseField(key, Number(e.target.value) || 0)}
-                    className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm bg-white entry-touch-input"
+            {showOptionalExpenses && (
+              <>
+                <p className="text-xs text-slate-500">يمكن الحفظ بدون مصاريف — اترك الحقول فارغة</p>
+                {monthOilFromTab > 0 && (
+                  <p className="text-xs text-orange-800 tabular-nums">
+                    يشمل زيت هذا الشهر من تبويب «متابعة الزيت»: {fmt(monthOilFromTab)} د.أ
+                  </p>
+                )}
+                <div className="entry-expense-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {VISIBLE_EXPENSE_KEYS.map((key) => (
+                    <label key={key} className="block">
+                      <span className="text-xs font-medium text-slate-600">
+                        {EXPENSE_FIELD_LABELS[key]} <span className="text-slate-400">(اختياري)</span>
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={expenseDetails[key] || ''}
+                        onChange={(e) => setExpenseField(key, Number(e.target.value) || 0)}
+                        className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm bg-white entry-touch-input"
+                      />
+                    </label>
+                  ))}
+                </div>
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-600">ملاحظات (اختياري)</span>
+                  <textarea
+                    value={form.notes ?? ''}
+                    onChange={(e) => onFormChange((f) => ({ ...f, notes: e.target.value }))}
+                    rows={3}
+                    placeholder="مثال: 10 أيام توقف، موازنة إطارات..."
+                    className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm bg-white resize-none entry-touch-input"
                   />
                 </label>
-              ))}
-            </div>
-            <label className="block">
-              <span className="text-xs font-medium text-slate-600">ملاحظات (اختياري)</span>
-              <textarea
-                value={form.notes ?? ''}
-                onChange={(e) => onFormChange((f) => ({ ...f, notes: e.target.value }))}
-                rows={3}
-                placeholder="مثال: 10 أيام توقف، موازنة إطارات..."
-                className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm bg-white resize-none entry-touch-input"
-              />
-            </label>
+              </>
+            )}
           </div>
 
-          <div className="entry-form-summary">
+          <div className="entry-form-summary entry-form-section entry-form-section--summary">
             <div className="entry-form-summary__item text-slate-600">
               المطلوب
               <strong className="text-slate-800">{fmt(previewTotalDue)}</strong>
@@ -3084,32 +3053,6 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
               </strong>
             </div>
           </div>
-          {(previewRemaining > 0 || form.paymentComplete) && (
-            <div className="entry-form-complete-row">
-              <p className="text-xs text-slate-600 flex-1">
-                أحمر عند وجود متبقي — أخضر عند اكتمال السداد. يمكنك تعليم الشهر «مكتمل» يدوياً
-                حتى مع وجود متبقي.
-              </p>
-              {previewRemaining > 0 && !form.paymentComplete && (
-                <button
-                  type="button"
-                  onClick={() => onFormChange((f) => ({ ...f, paymentComplete: true }))}
-                  className="entry-form-complete-btn"
-                >
-                  مكتمل
-                </button>
-              )}
-              {form.paymentComplete && (
-                <button
-                  type="button"
-                  onClick={() => onFormChange((f) => ({ ...f, paymentComplete: false }))}
-                  className="entry-form-complete-btn entry-form-complete-btn--off"
-                >
-                  غير مكتمل
-                </button>
-              )}
-            </div>
-          )}
           <div className="entry-form-actions">
             <button
               type="button"
@@ -3130,7 +3073,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
         </form>
       )}
 
-      <div className="tracking-list-panel bg-white border border-slate-200 rounded-xl shadow-sm p-4 space-y-3">
+      <div className="tracking-list-panel tracking-list-panel--formal bg-white border border-slate-200 rounded-xl shadow-sm p-4 space-y-3">
         <div className="tracking-filters-row">
           <label className="tracking-filters-search block">
             <span className="sr-only">بحث</span>
@@ -3217,7 +3160,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
               </button>
               <button
                 type="button"
-                className={`tracking-segmented__btn ${
+                className={`tracking-segmented__btn tracking-segmented__btn--table-only ${
                   viewMode === 'table' ? 'tracking-segmented__btn--active' : ''
                 }`}
                 onClick={() => setViewModePersisted('table')}
@@ -3604,7 +3547,7 @@ const InsuranceAccidentsTab: React.FC<{
         </button>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mobile-stat-grid">
         <div className="bg-orange-50 border border-orange-100 rounded-xl p-3 text-center">
           <p className="text-xs text-slate-600">مجموع الإصلاح</p>
           <p className="text-lg font-bold text-orange-800 tabular-nums">−{fmt(totalsRepair)}</p>
@@ -4858,7 +4801,7 @@ const DashboardTab: React.FC<{
 
   return (
   <div className="space-y-6">
-    <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mobile-stat-grid">
       <StatCard
         label="إجمالي الإيرادات"
         value={totals.totalRevenue}
@@ -4952,7 +4895,7 @@ const DashboardTab: React.FC<{
     {(accidentSummary.count > 0 || accidentSummary.totalInsuranceReceived > 0) && (
       <div className="bg-white border border-amber-200 rounded-xl p-5 shadow-sm space-y-4">
         <h3 className="font-semibold text-slate-800">الحوادث والتأمين</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mobile-stat-grid">
           <div className="bg-orange-50 border border-orange-100 rounded-lg p-3 text-center">
             <p className="text-xs text-slate-600">تكاليف الحوادث</p>
             <p className="text-lg font-bold text-orange-800 tabular-nums">
@@ -5061,7 +5004,7 @@ const DashboardTab: React.FC<{
     {totals.totalExpenses > 0 && (
       <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
         <h3 className="font-semibold text-slate-800 mb-4">تفاصيل المصاريف (إجمالي)</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3 mobile-stat-grid">
           {REPORT_EXPENSE_KEYS.map((key) => {
             const val = totals.expenseByCategory[key];
             if (val <= 0) return null;
