@@ -142,7 +142,8 @@ import {
   paymentStatusBadgeClass,
 } from '../utils/taxiCalculations';
 import {
-  normalizeDriverPayments,
+  clampInstallmentPayment,
+  settleDriverPayments,
   sumDriverPayments,
   splitRevenueToInstallments,
   entryTotalDue,
@@ -928,7 +929,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
     };
     const expenses = sumExpenses(expenseDetails);
     const existing = editingId ? entries.find((x) => x.id === editingId) : undefined;
-    const driverPayments = normalizeDriverPayments(
+    const driverPayments = settleDriverPayments(
       form.driverPayments,
       undefined,
       form.revenue
@@ -2577,7 +2578,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
     [form.revenue]
   );
   const formPayments = useMemo(
-    () => normalizeDriverPayments(form.driverPayments, form.driverPaid, form.revenue || 0),
+    () => settleDriverPayments(form.driverPayments, form.driverPaid, form.revenue || 0),
     [form.driverPayments, form.driverPaid, form.revenue]
   );
   const formPaidTotal = sumDriverPayments(formPayments);
@@ -2590,9 +2591,21 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
 
   const setInstallment = (index: 0 | 1 | 2, value: number) => {
     onFormChange((f) => {
-      const payments = normalizeDriverPayments(f.driverPayments, f.driverPaid, f.revenue || 0);
+      const targets = splitRevenueToInstallments(f.revenue || 0);
+      const payments = settleDriverPayments(f.driverPayments, f.driverPaid, f.revenue || 0);
       const next: DriverPaymentTriple = [...payments];
-      next[index] = Math.max(0, value);
+      next[index] = clampInstallmentPayment(value, targets[index]);
+      return { ...f, driverPayments: next, driverPaid: sumDriverPayments(next) };
+    });
+  };
+
+  const toggleInstallment = (index: 0 | 1 | 2) => {
+    onFormChange((f) => {
+      const targets = splitRevenueToInstallments(f.revenue || 0);
+      const payments = settleDriverPayments(f.driverPayments, f.driverPaid, f.revenue || 0);
+      const next: DriverPaymentTriple = [...payments];
+      const target = targets[index];
+      next[index] = payments[index] >= target && target > 0 ? 0 : target;
       return { ...f, driverPayments: next, driverPaid: sumDriverPayments(next) };
     });
   };
@@ -2906,14 +2919,30 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                     الإيراد ÷ ٣ — كل دفعة ضمان متساوية
                   </p>
                   <div className="entry-installment-chips">
-                    {DRIVER_PAYMENT_LABELS.map((label, idx) => (
-                      <span key={label} className="entry-installment-chip">
-                        <span className="entry-installment-chip__label">{label}</span>
-                        <span className="entry-installment-chip__value">
-                          {fmt(installmentTargets[idx as 0 | 1 | 2])}
-                        </span>
-                      </span>
-                    ))}
+                    {DRIVER_PAYMENT_LABELS.map((label, idx) => {
+                      const i = idx as 0 | 1 | 2;
+                      const target = installmentTargets[i];
+                      const paid = formPayments[i];
+                      const done = paid >= target && target > 0;
+                      return (
+                        <button
+                          key={label}
+                          type="button"
+                          onClick={() => toggleInstallment(i)}
+                          className={`entry-installment-chip entry-installment-chip--btn ${
+                            done ? 'entry-installment-chip--done' : ''
+                          }`}
+                          title={
+                            done
+                              ? 'اضغط لإلغاء تسديد هذا القسط'
+                              : `تسديد ${fmt(target)} د.أ`
+                          }
+                        >
+                          <span className="entry-installment-chip__label">{label}</span>
+                          <span className="entry-installment-chip__value">{fmt(target)}</span>
+                        </button>
+                      );
+                    })}
                     <span className="text-xs text-slate-400 tabular-nums self-center">
                       = {fmt(previewTotalDue)} د.أ
                     </span>
@@ -2950,7 +2979,8 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                       <input
                         type="number"
                         min={0}
-                        step={1}
+                        max={target}
+                        step={target > 0 ? Math.min(50, target) : 1}
                         value={paid || ''}
                         onChange={(e) => setInstallment(i, Number(e.target.value) || 0)}
                         className={`entry-touch-input border rounded-lg px-2 py-2.5 text-base sm:text-sm bg-white tabular-nums w-full max-w-none ${
@@ -2959,6 +2989,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                             : 'border-slate-200'
                         }`}
                         placeholder={String(target)}
+                        aria-label={`${label} — الحد الأقصى ${fmt(target)} د.أ`}
                       />
                     </div>
                   );

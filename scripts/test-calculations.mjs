@@ -15,6 +15,11 @@ import {
   sumExpenses,
 } from '../utils/taxiCalculations.ts';
 import {
+  settleDriverPayments,
+  splitRevenueToInstallments,
+  sumDriverPayments,
+} from '../utils/taxiDriverPayments.ts';
+import {
   computeAccidentSummary,
   computeClaimBreakdown,
   getDowntimeDailyRate,
@@ -82,6 +87,32 @@ assert(roi.lifeMonths === 84, 'life months');
 
 // month key duplicate detection
 assert(monthKey('2026-05-01') === monthKey('2026-05-15'), 'same month key');
+
+// installment payments capped per slot (revenue 750 → 250+250+250)
+const targets = splitRevenueToInstallments(750);
+assert(targets[0] === 250 && targets[1] === 250 && targets[2] === 250, '750 split to 250 each');
+const capped = settleDriverPayments([1, 1, 1], undefined, 750);
+assert(sumDriverPayments(capped) === 3, 'tiny values kept if under cap');
+const full = settleDriverPayments([250, 250, 250], undefined, 750);
+assert(sumDriverPayments(full) === 750, 'full installments sum to revenue');
+const over = settleDriverPayments([500, 250, 250], undefined, 750);
+assert(sumDriverPayments(over) === 750, 'overpayment per slot clamped');
+const entryFull = computeEntry(
+  {
+    id: 'pay-full',
+    date: '2026-06-01',
+    month: '',
+    driverName: 'Test',
+    revenue: 750,
+    expenses: 0,
+    expenseDetails: { office: 0, insurance: 0, oil: 0, maintenance: 0, accident: 0, commission: 0, other: 0 },
+    driverPayments: [250, 250, 250],
+    driverPaid: 750,
+  },
+  750
+);
+assert(entryFull.remaining === 0, 'full payment → no remaining');
+assert(entryFull.status === 'مكتمل', 'full payment → complete');
 
 // accidents → dashboard merge
 const accidents = [

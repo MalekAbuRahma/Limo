@@ -17,6 +17,34 @@ export function sumDriverPayments(payments: DriverPaymentTriple): number {
   return payments[0] + payments[1] + payments[2];
 }
 
+/** لا يتجاوز مبلغ القسط الواحد هدفه (مثلاً ٢٥٠ من ٢٥٠) */
+export function clampInstallmentPayment(value: number, target: number): number {
+  const t = Math.max(0, Math.round(target));
+  return Math.max(0, Math.min(Math.round(value), t));
+}
+
+export function clampDriverPayments(
+  payments: DriverPaymentTriple,
+  targets: DriverPaymentTriple
+): DriverPaymentTriple {
+  return [
+    clampInstallmentPayment(payments[0], targets[0]),
+    clampInstallmentPayment(payments[1], targets[1]),
+    clampInstallmentPayment(payments[2], targets[2]),
+  ];
+}
+
+/** تطبيع الأقساط ثم قصّها حسب الإيراد ÷ ٣ */
+export function settleDriverPayments(
+  raw: number[] | undefined,
+  legacyPaid: number | undefined,
+  revenue: number
+): DriverPaymentTriple {
+  const targets = splitRevenueToInstallments(revenue);
+  const base = normalizeDriverPayments(raw, legacyPaid, revenue);
+  return clampDriverPayments(base, targets);
+}
+
 /** يوزّع مدفوعاً قديماً (حقل واحد) على الأقساط حتى حد كل قسط */
 function legacyPaidToInstallments(
   legacyPaid: number,

@@ -6,7 +6,7 @@ import {
 } from '../taxiTypes';
 import { formatInteger } from './taxiFormat';
 import {
-  normalizeDriverPayments,
+  settleDriverPayments,
   sumDriverPayments,
   splitRevenueToInstallments,
   entryTotalDue,
@@ -180,7 +180,7 @@ export function computeEntry(
   const expenses = sumExpenses(expenseDetails);
   const guarantee = entry.monthlyGuarantee ?? defaultGuarantee;
   const installmentTargets = splitRevenueToInstallments(entry.revenue);
-  const driverPayments = normalizeDriverPayments(
+  const driverPayments = settleDriverPayments(
     entry.driverPayments,
     entry.driverPaid,
     entry.revenue
