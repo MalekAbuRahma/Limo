@@ -1,13 +1,7 @@
 import React, { useState } from 'react';
 import { loginViaApi } from '../utils/authApi';
 import { checkApiHealth } from '../utils/taxiApi';
-import {
-  createOfflineSession,
-  saveSession,
-  sessionFromApiUser,
-  validateOfflineLogin,
-  type UserSession,
-} from '../utils/taxiAuth';
+import { saveSession, sessionFromApiUser, type UserSession } from '../utils/taxiAuth';
 
 export type UiLanguage = 'ar' | 'en';
 
@@ -18,8 +12,8 @@ const copy = {
     username: 'اسم المستخدم',
     password: 'كلمة المرور',
     submit: 'دخول',
-    offline: 'وضع بدون خادم (محلي فقط)',
     restricted: 'البيانات محفوظة على الخادم — يتطلب حساباً صالحاً',
+    serverUnavailable: 'تعذّر الاتصال بالخادم — حاول لاحقاً أو تواصل مع الدعم',
     error: 'تحقق من اسم المستخدم وكلمة المرور',
     staleApi:
       'خادم API قديم — أوقف التطبيق (STOP-VIP-limousine-CARS.bat) ثم شغّله من جديد (START-VIP-limousine-CARS.bat)',
@@ -32,8 +26,8 @@ const copy = {
     username: 'Username',
     password: 'Password',
     submit: 'Sign in',
-    offline: 'Offline mode (local only)',
     restricted: 'Data is stored on the server — valid account required',
+    serverUnavailable: 'Cannot reach the server — try again later or contact support',
     error: 'Invalid username or password',
     staleApi:
       'API server is outdated — run STOP-VIP-limousine-CARS.bat then START-VIP-limousine-CARS.bat',
@@ -70,40 +64,22 @@ const TaxiLogin: React.FC<TaxiLoginProps> = ({ onLogin, lang, setLang }) => {
 
     const apiUp = await checkApiHealth(true);
 
-    if (apiUp) {
-      const result = await loginViaApi(username, password);
-      if (result.ok) {
-        finish(sessionFromApiUser(result.user, result.token));
-        setBusy(false);
-        return;
-      }
+    if (!apiUp) {
       setError(true);
-      setErrorMessage(result.reason === 'not_found' ? t.staleApi : t.error);
+      setErrorMessage(t.serverUnavailable);
       setBusy(false);
       return;
     }
 
-    const role = validateOfflineLogin(username, password);
-    if (!role) {
-      setError(true);
+    const result = await loginViaApi(username, password);
+    if (result.ok) {
+      finish(sessionFromApiUser(result.user, result.token));
       setBusy(false);
       return;
     }
-    finish(createOfflineSession(username, role));
+    setError(true);
+    setErrorMessage(result.reason === 'not_found' ? t.staleApi : t.error);
     setBusy(false);
-  };
-
-  const handleOffline = () => {
-    const role = validateOfflineLogin(username || 'user', password || 'offline');
-    if (!role && !username.trim()) {
-      finish(createOfflineSession('مستخدم', 'user'));
-      return;
-    }
-    if (!role) {
-      setError(true);
-      return;
-    }
-    finish(createOfflineSession(username || 'مستخدم', role));
   };
 
   return (
@@ -196,21 +172,13 @@ const TaxiLogin: React.FC<TaxiLoginProps> = ({ onLogin, lang, setLang }) => {
                 placeholder="••••••••"
               />
             </label>
-            <div className="pt-2 space-y-2">
+            <div className="pt-2">
               <button
                 type="submit"
                 disabled={busy}
                 className="w-full py-2.5 bg-green-600 text-white rounded-xl text-sm font-semibold hover:bg-green-700 shadow-sm disabled:opacity-60"
               >
                 {busy ? (lang === 'ar' ? 'جاري الدخول...' : 'Signing in...') : t.submit}
-              </button>
-              <button
-                type="button"
-                onClick={handleOffline}
-                disabled={busy}
-                className="w-full py-2 text-slate-500 text-xs font-medium hover:text-slate-700 disabled:opacity-60"
-              >
-                {t.offline}
               </button>
             </div>
           </form>
