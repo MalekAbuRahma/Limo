@@ -61,6 +61,7 @@ export function rowToEntry(row) {
       Number(row.driver_payment_3 ?? 0),
     ],
     paymentComplete: Boolean(row.payment_complete),
+    workStartDate: row.work_start_date?.trim() || undefined,
     monthlyGuarantee: row.monthly_guarantee != null ? Number(row.monthly_guarantee) : undefined,
   };
 }

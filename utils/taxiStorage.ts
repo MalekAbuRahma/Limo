@@ -3,10 +3,7 @@ import { migrateAccident } from './taxiAccidents';
 import { migrateLicense } from './taxiLicenses';
 import { migrateOilChange } from './taxiOilChange';
 import { formatMonthLabel, normalizeExpenseDetails, sumExpenses } from './taxiCalculations';
-import {
-  normalizeDriverPayments,
-  sumDriverPayments,
-} from './taxiDriverPayments';
+import { settleDriverPayments, sumDriverPayments } from './taxiDriverPayments';
 
 const STORAGE_KEY = 'taxi_tracker_data';
 
@@ -43,10 +40,14 @@ export function migrateEntry(raw: Partial<MonthlyEntry> & { id: string }): Month
   );
   const date = raw.date || new Date().toISOString().slice(0, 10);
   const revenue = raw.revenue ?? 0;
-  const driverPayments = normalizeDriverPayments(
+  const guarantee = raw.monthlyGuarantee ?? DEFAULT_SETTINGS.monthlyGuarantee;
+  const driverPayments = settleDriverPayments(
     raw.driverPayments,
     raw.driverPaid,
-    revenue
+    date,
+    revenue,
+    guarantee,
+    raw.workStartDate
   );
   const driverPaid = sumDriverPayments(driverPayments);
   return {
@@ -61,6 +62,7 @@ export function migrateEntry(raw: Partial<MonthlyEntry> & { id: string }): Month
     driverPaid,
     driverPayments,
     paymentComplete: raw.paymentComplete ?? false,
+    workStartDate: raw.workStartDate?.trim() || undefined,
     monthlyGuarantee: raw.monthlyGuarantee ?? DEFAULT_SETTINGS.monthlyGuarantee,
   };
 }

@@ -335,8 +335,9 @@ export async function saveVehicleState(vehicleId, state) {
           id, vehicle_id, date, month, driver_name, revenue, expenses,
           expense_office, expense_insurance, expense_oil, expense_maintenance,
           expense_accident, expense_commission, expense_other, notes, driver_paid,
-          driver_payment_1, driver_payment_2, driver_payment_3, monthly_guarantee, payment_complete
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
+          driver_payment_1, driver_payment_2, driver_payment_3, monthly_guarantee, payment_complete,
+          work_start_date
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
         [
           e.id,
           vehicleId,
@@ -359,6 +360,7 @@ export async function saveVehicleState(vehicleId, state) {
           e.driverPayments?.[2] ?? 0,
           e.monthlyGuarantee ?? null,
           Boolean(e.paymentComplete),
+          e.workStartDate ?? '',
         ]
       );
     }

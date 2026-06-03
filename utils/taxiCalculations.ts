@@ -8,10 +8,11 @@ import { formatInteger } from './taxiFormat';
 import {
   settleDriverPayments,
   sumDriverPayments,
-  splitRevenueToInstallments,
   entryTotalDue,
+  getRentScheduleForEntry,
   type DriverPaymentTriple,
 } from './taxiDriverPayments';
+import type { RentSchedule } from './taxiRentSchedule';
 
 export type PaymentStatus = 'مكتمل' | 'غير مكتمل';
 
@@ -162,10 +163,12 @@ export function normalizeExpenseDetails(
 
 export interface EntryComputed extends MonthlyEntry {
   guarantee: number;
-  /** المطلوب من السائق (الإيراد أو الضمان) */
+  /** المطلوب من السائق (إيراد الشهر بعد التناسب إن وُجد تاريخ بدء) */
   totalDue: number;
   driverPayments: DriverPaymentTriple;
   installmentTargets: DriverPaymentTriple;
+  /** جدول الدفع لهذا الشهر */
+  rentSchedule: RentSchedule;
   remaining: number;
   status: PaymentStatus;
   net: number;
@@ -179,14 +182,23 @@ export function computeEntry(
   const expenseDetails = entryExpenseDetails(entry, oilChanges);
   const expenses = sumExpenses(expenseDetails);
   const guarantee = entry.monthlyGuarantee ?? defaultGuarantee;
-  const installmentTargets = splitRevenueToInstallments(entry.revenue);
+  const rentSchedule = getRentScheduleForEntry(
+    entry.date,
+    entry.revenue,
+    guarantee,
+    entry.workStartDate
+  );
+  const installmentTargets = rentSchedule.slotTargets as DriverPaymentTriple;
   const driverPayments = settleDriverPayments(
     entry.driverPayments,
     entry.driverPaid,
-    entry.revenue
+    entry.date,
+    entry.revenue,
+    guarantee,
+    entry.workStartDate
   );
   const driverPaid = sumDriverPayments(driverPayments);
-  const totalDue = entryTotalDue(entry.revenue, guarantee);
+  const totalDue = rentSchedule.totalDue;
   const remaining = getRemaining(totalDue, driverPaid);
   const paymentComplete = Boolean(entry.paymentComplete);
   return {
@@ -200,6 +212,7 @@ export function computeEntry(
     guarantee,
     totalDue,
     installmentTargets,
+    rentSchedule,
     remaining,
     status: resolvePaymentStatus(remaining, paymentComplete),
     net: entry.revenue - expenses,

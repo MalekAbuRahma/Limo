@@ -16,9 +16,13 @@ import {
 } from '../utils/taxiCalculations.ts';
 import {
   settleDriverPayments,
-  splitRevenueToInstallments,
   sumDriverPayments,
 } from '../utils/taxiDriverPayments.ts';
+import {
+  computeRentSchedule,
+  computeWorkSpan,
+  computeProratedDue,
+} from '../utils/taxiRentSchedule.ts';
 import {
   computeAccidentSummary,
   computeClaimBreakdown,
@@ -88,14 +92,29 @@ assert(roi.lifeMonths === 84, 'life months');
 // month key duplicate detection
 assert(monthKey('2026-05-01') === monthKey('2026-05-15'), 'same month key');
 
-// installment payments capped per slot (revenue 750 → 250+250+250)
-const targets = splitRevenueToInstallments(750);
-assert(targets[0] === 250 && targets[1] === 250 && targets[2] === 250, '750 split to 250 each');
-const capped = settleDriverPayments([1, 1, 1], undefined, 750);
-assert(sumDriverPayments(capped) === 3, 'tiny values kept if under cap');
-const full = settleDriverPayments([250, 250, 250], undefined, 750);
-assert(sumDriverPayments(full) === 750, 'full installments sum to revenue');
-const over = settleDriverPayments([500, 250, 250], undefined, 750);
+// rent schedule: full month June 750 → 3 payments
+const juneFull = computeRentSchedule('2026-06-01', 750, 750);
+assert(juneFull.totalDue === 750, 'full month due = revenue');
+assert(juneFull.slotCount === 3, '30 days → 3 slots');
+assert(
+  juneFull.slotTargets[0] + juneFull.slotTargets[1] + juneFull.slotTargets[2] === 750,
+  'slots sum to due'
+);
+
+// start 22 May 2026: 10 calendar days, prorated due
+const maySpan = computeWorkSpan('2026-05-01', '2026-05-22');
+assert(maySpan.daysWorked === 10, '22–31 May = 10 days');
+const mayDue = computeProratedDue(750, maySpan);
+assert(mayDue === Math.round((750 * 10) / 31), 'prorated may due');
+const maySched = computeRentSchedule('2026-05-01', 750, 750, '2026-05-22');
+assert(maySched.slotCount === 1, '10 days → 1 payment slot');
+assert(maySched.totalDue === mayDue, 'schedule due matches proration');
+
+const capped = settleDriverPayments([1, 1, 1], undefined, '2026-06-01', 750, 750);
+assert(sumDriverPayments(capped) === 3, 'partial payment allowed per slot');
+const full = settleDriverPayments([250, 250, 250], undefined, '2026-06-01', 750, 750);
+assert(sumDriverPayments(full) === 750, 'full installments sum to due');
+const over = settleDriverPayments([500, 250, 250], undefined, '2026-06-01', 750, 750);
 assert(sumDriverPayments(over) === 750, 'overpayment per slot clamped');
 const entryFull = computeEntry(
   {
@@ -113,6 +132,23 @@ const entryFull = computeEntry(
 );
 assert(entryFull.remaining === 0, 'full payment → no remaining');
 assert(entryFull.status === 'مكتمل', 'full payment → complete');
+
+const entryPartialStart = computeEntry(
+  {
+    id: 'may-partial',
+    date: '2026-05-01',
+    workStartDate: '2026-05-22',
+    month: '',
+    driverName: 'Test',
+    revenue: 750,
+    expenses: 0,
+    expenseDetails: { office: 0, insurance: 0, oil: 0, maintenance: 0, accident: 0, commission: 0, other: 0 },
+    driverPayments: [mayDue, 0, 0],
+    driverPaid: mayDue,
+  },
+  750
+);
+assert(entryPartialStart.remaining === 0, 'paid prorated amount → complete');
 
 // accidents → dashboard merge
 const accidents = [

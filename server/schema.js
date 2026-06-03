@@ -125,6 +125,9 @@ export async function initSchema() {
   await pool.query(`
     ALTER TABLE monthly_entries ADD COLUMN IF NOT EXISTS payment_complete BOOLEAN NOT NULL DEFAULT FALSE;
   `);
+  await pool.query(`
+    ALTER TABLE monthly_entries ADD COLUMN IF NOT EXISTS work_start_date TEXT NOT NULL DEFAULT '';
+  `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (

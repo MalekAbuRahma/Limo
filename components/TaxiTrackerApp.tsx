@@ -145,10 +145,11 @@ import {
   clampInstallmentPayment,
   settleDriverPayments,
   sumDriverPayments,
-  splitRevenueToInstallments,
-  entryTotalDue,
+  getRentScheduleForEntry,
+  fullPaymentsForSchedule,
   type DriverPaymentTriple,
 } from '../utils/taxiDriverPayments';
+import { paymentSlotLabel, daysInCalendarMonth } from '../utils/taxiRentSchedule';
 
 type Tab = 'tracking' | 'dashboard' | 'insurance' | 'licenses' | 'oil' | 'settings';
 type HomeTab = 'fleet' | 'settings';
@@ -163,6 +164,7 @@ const emptyForm = (defaultAmount = 750): Omit<MonthlyEntry, 'id'> => ({
   notes: '',
   driverPaid: 0,
   driverPayments: [0, 0, 0],
+  workStartDate: undefined,
   paymentComplete: false,
 });
 
@@ -894,6 +896,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
       notes: entry.notes ?? '',
       driverPaid: computed.driverPaid,
       driverPayments: [...computed.driverPayments],
+      workStartDate: entry.workStartDate,
       paymentComplete: Boolean(entry.paymentComplete),
     });
     setShowForm(true);
@@ -932,7 +935,10 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
     const driverPayments = settleDriverPayments(
       form.driverPayments,
       undefined,
-      form.revenue
+      form.date,
+      form.revenue,
+      existing?.monthlyGuarantee ?? guarantee,
+      form.workStartDate
     );
     const driverPaid = sumDriverPayments(driverPayments);
     const entry: MonthlyEntry = {
@@ -1159,7 +1165,13 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
   };
 
   const applyFullPaymentToEntry = (entry: MonthlyEntry): MonthlyEntry => {
-    const driverPayments = splitRevenueToInstallments(entry.revenue);
+    const schedule = getRentScheduleForEntry(
+      entry.date,
+      entry.revenue,
+      entry.monthlyGuarantee ?? guarantee,
+      entry.workStartDate
+    );
+    const driverPayments = fullPaymentsForSchedule(schedule);
     const driverPaid = sumDriverPayments(driverPayments);
     return {
       ...entry,
@@ -2573,16 +2585,32 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
 }) => {
   const editingEntry = editingId ? entries.find((e) => e.id === editingId) : undefined;
   const formGuarantee = editingEntry?.guarantee ?? guarantee;
-  const installmentTargets = useMemo(
-    () => splitRevenueToInstallments(form.revenue || 0),
-    [form.revenue]
+  const rentSchedule = useMemo(
+    () =>
+      getRentScheduleForEntry(
+        form.date || '',
+        form.revenue || 0,
+        formGuarantee,
+        form.workStartDate
+      ),
+    [form.date, form.revenue, formGuarantee, form.workStartDate]
   );
+  const installmentTargets = rentSchedule.slotTargets;
+  const activeSlotCount = rentSchedule.slotCount;
   const formPayments = useMemo(
-    () => settleDriverPayments(form.driverPayments, form.driverPaid, form.revenue || 0),
-    [form.driverPayments, form.driverPaid, form.revenue]
+    () =>
+      settleDriverPayments(
+        form.driverPayments,
+        form.driverPaid,
+        form.date || '',
+        form.revenue || 0,
+        formGuarantee,
+        form.workStartDate
+      ),
+    [form.driverPayments, form.driverPaid, form.date, form.revenue, formGuarantee, form.workStartDate]
   );
   const formPaidTotal = sumDriverPayments(formPayments);
-  const previewTotalDue = entryTotalDue(form.revenue || 0, formGuarantee);
+  const previewTotalDue = rentSchedule.totalDue;
   const previewRemaining = Math.max(0, previewTotalDue - formPaidTotal);
   const previewStatus = resolvePaymentStatus(
     previewRemaining,
@@ -2591,8 +2619,21 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
 
   const setInstallment = (index: 0 | 1 | 2, value: number) => {
     onFormChange((f) => {
-      const targets = splitRevenueToInstallments(f.revenue || 0);
-      const payments = settleDriverPayments(f.driverPayments, f.driverPaid, f.revenue || 0);
+      const schedule = getRentScheduleForEntry(
+        f.date || '',
+        f.revenue || 0,
+        formGuarantee,
+        f.workStartDate
+      );
+      const targets = schedule.slotTargets;
+      const payments = settleDriverPayments(
+        f.driverPayments,
+        f.driverPaid,
+        f.date || '',
+        f.revenue || 0,
+        formGuarantee,
+        f.workStartDate
+      );
       const next: DriverPaymentTriple = [...payments];
       next[index] = clampInstallmentPayment(value, targets[index]);
       return { ...f, driverPayments: next, driverPaid: sumDriverPayments(next) };
@@ -2601,8 +2642,21 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
 
   const toggleInstallment = (index: 0 | 1 | 2) => {
     onFormChange((f) => {
-      const targets = splitRevenueToInstallments(f.revenue || 0);
-      const payments = settleDriverPayments(f.driverPayments, f.driverPaid, f.revenue || 0);
+      const schedule = getRentScheduleForEntry(
+        f.date || '',
+        f.revenue || 0,
+        formGuarantee,
+        f.workStartDate
+      );
+      const targets = schedule.slotTargets;
+      const payments = settleDriverPayments(
+        f.driverPayments,
+        f.driverPaid,
+        f.date || '',
+        f.revenue || 0,
+        formGuarantee,
+        f.workStartDate
+      );
       const next: DriverPaymentTriple = [...payments];
       const target = targets[index];
       next[index] = payments[index] >= target && target > 0 ? 0 : target;
@@ -2634,6 +2688,13 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
   const setPeriod = (year: string, month: string) => {
     onMonthPickerChange(`${year}-${month}`);
   };
+
+  const periodYearNum = parseInt(periodYear, 10) || new Date().getFullYear();
+  const periodMonthNum = parseInt(periodMonth, 10) || 1;
+  const workStartMin = `${periodYear}-${periodMonth}-01`;
+  const workStartMax = `${periodYear}-${periodMonth}-${String(
+    daysInCalendarMonth(periodYearNum, periodMonthNum)
+  ).padStart(2, '0')}`;
 
   const setExpenseField = (key: keyof ExpenseBreakdown, value: number) => {
     onFormChange((f) => {
@@ -2838,7 +2899,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
               {formError}
             </div>
           )}
-          <div className="entry-form-meta entry-form-section entry-form-section--meta grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="entry-form-meta entry-form-section entry-form-section--meta grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <label className="block">
               <span className="text-xs font-medium text-slate-500">الشهر / السنة</span>
               <div className="entry-month-year-field mt-1">
@@ -2880,6 +2941,23 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
               </p>
             </label>
             <label className="block">
+              <span className="text-xs font-medium text-slate-500">تاريخ بدء العمل (اختياري)</span>
+              <input
+                type="date"
+                min={workStartMin}
+                max={workStartMax}
+                value={form.workStartDate ?? ''}
+                onChange={(e) =>
+                  onFormChange((f) => ({
+                    ...f,
+                    workStartDate: e.target.value.trim() || undefined,
+                  }))
+                }
+                className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm tabular-nums entry-touch-input"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">فارغ = من أول الشهر</p>
+            </label>
+            <label className="block sm:col-span-2 lg:col-span-1">
               <span className="text-xs font-medium text-slate-500">اسم السائق</span>
               <input
                 type="text"
@@ -2893,7 +2971,9 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
 
           <div className="entry-payments-card entry-form-section entry-form-section--payments">
             <div className="entry-payments-card__head">
-              <h3 className="text-sm font-semibold text-blue-900">دفعات السائق — ٣ دفعات ضمان</h3>
+              <h3 className="text-sm font-semibold text-blue-900">
+                دفعات السائق — {activeSlotCount} دفعة ضمان
+              </h3>
               <span className="text-xs sm:text-sm font-bold text-blue-800 tabular-nums">
                 المدفوع {fmt(formPaidTotal)} / {fmt(previewTotalDue)} د.أ
               </span>
@@ -2916,11 +2996,17 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                 </div>
                 <div className="flex-1 min-w-0">
                   <p id="revenue-split-hint" className="text-xs text-slate-500 mb-2 text-right">
-                    الإيراد ÷ ٣ — كل دفعة ضمان متساوية
+                    إيراد الشهر (صفقة كاملة): {fmt(form.revenue || 0)} د.أ — {rentSchedule.periodHint}
                   </p>
+                  {previewTotalDue < (form.revenue || 0) && (
+                    <p className="text-xs text-amber-800 mb-2 text-right tabular-nums">
+                      المطلوب بعد التناسب: {fmt(previewTotalDue)} د.أ
+                    </p>
+                  )}
                   <div className="entry-installment-chips">
-                    {DRIVER_PAYMENT_LABELS.map((label, idx) => {
+                    {Array.from({ length: activeSlotCount }, (_, idx) => {
                       const i = idx as 0 | 1 | 2;
+                      const label = paymentSlotLabel(i);
                       const target = installmentTargets[i];
                       const paid = formPayments[i];
                       const done = paid >= target && target > 0;
@@ -2961,9 +3047,15 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                 </div>
               )}
 
-              <div className="entry-installment-inputs">
-                {DRIVER_PAYMENT_LABELS.map((label, idx) => {
+              <div
+                className="entry-installment-inputs"
+                style={{
+                  gridTemplateColumns: `repeat(${activeSlotCount}, minmax(0, 1fr))`,
+                }}
+              >
+                {Array.from({ length: activeSlotCount }, (_, idx) => {
                   const i = idx as 0 | 1 | 2;
+                  const label = paymentSlotLabel(i);
                   const target = installmentTargets[i];
                   const paid = formPayments[i];
                   const done = paid >= target && target > 0;
