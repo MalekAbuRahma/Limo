@@ -1,6 +1,7 @@
 import React, { useId } from 'react';
 import type { MonthlyEntry, OilChangeRecord } from '../taxiTypes';
-import { EXPENSE_FIELD_LABELS, REPORT_EXPENSE_KEYS, DRIVER_PAYMENT_LABELS } from '../taxiTypes';
+import { EXPENSE_FIELD_LABELS, REPORT_EXPENSE_KEYS } from '../taxiTypes';
+import { paymentSlotLabelForCycle } from '../utils/taxiRentSchedule';
 import { formatNumber } from '../utils/taxiFormat';
 import { computeEntry, paymentStatusBadgeClass } from '../utils/taxiCalculations';
 import AppModal, { AppModalBody, AppModalFooter, AppModalHeader } from './AppModal';
@@ -35,6 +36,11 @@ export interface MonthlyEntryConfirmModalProps {
   entry: MonthlyEntry | null;
   guarantee: number;
   oilChanges?: OilChangeRecord[];
+  paymentMode?: 'advance' | 'deferred';
+  vehicleSettings?: {
+    driverFirstPaymentDate?: string;
+    paymentCycleEpoch?: number;
+  };
   isEditMode: boolean;
   onConfirm: () => void;
   onBack: () => void;
@@ -45,6 +51,8 @@ const MonthlyEntryConfirmModal: React.FC<MonthlyEntryConfirmModalProps> = ({
   entry,
   guarantee,
   oilChanges = [],
+  paymentMode = 'advance',
+  vehicleSettings,
   isEditMode,
   onConfirm,
   onBack,
@@ -54,7 +62,7 @@ const MonthlyEntryConfirmModal: React.FC<MonthlyEntryConfirmModalProps> = ({
 
   if (!open || !entry) return null;
 
-  const computed = computeEntry(entry, guarantee, oilChanges);
+  const computed = computeEntry(entry, guarantee, oilChanges, paymentMode, vehicleSettings);
   const expenseItems = REPORT_EXPENSE_KEYS.filter((k) => computed.expenseDetails[k] > 0);
 
   return (
@@ -96,18 +104,35 @@ const MonthlyEntryConfirmModal: React.FC<MonthlyEntryConfirmModalProps> = ({
             </div>
           )}
           <div className="py-2 border-b border-slate-100">
-            <p className="text-xs font-semibold text-slate-600 mb-2">دفعات السائق (٣ دفعات ضمان)</p>
-            {DRIVER_PAYMENT_LABELS.map((label, idx) => (
-              <div key={label} className="flex justify-between text-xs gap-4 py-1">
-                <span className="tabular-nums font-medium text-slate-800">
-                  {fmt(computed.driverPayments[idx])} / {fmt(computed.installmentTargets[idx])} د.أ
-                </span>
-                <span className="text-slate-500">{label}</span>
-              </div>
-            ))}
+            <p className="text-xs font-semibold text-slate-600 mb-2">
+              دفعات السائق — {computed.rentSchedule.slotCount} استحقاق
+            </p>
+            {Array.from({ length: computed.rentSchedule.slotCount }, (_, idx) => {
+              const label = paymentSlotLabelForCycle(
+                idx,
+                computed.paymentCycle.dueDatesInMonth
+              );
+              return (
+                <div key={`${label}-${idx}`} className="flex justify-between text-xs gap-4 py-1">
+                  <span className="tabular-nums font-medium text-slate-800">
+                    {fmt(computed.driverPayments[idx])} / {fmt(computed.installmentTargets[idx])}{' '}
+                    د.أ
+                  </span>
+                  <span className="text-slate-500 tabular-nums">{label}</span>
+                </div>
+              );
+            })}
           </div>
           <SummaryRow label="مجموع المدفوع" value={`${fmt(computed.driverPaid)} د.أ`} />
-          <SummaryRow label="المطلوب (الإيراد)" value={`${fmt(computed.totalDue)} د.أ`} />
+          <SummaryRow
+            label="المطلوب (دورة ١٠ أيام)"
+            value={`${fmt(computed.totalDue)} د.أ`}
+          />
+          {computed.paymentCycle.periodHint && (
+            <p className="text-[11px] text-slate-500 pb-2 leading-relaxed">
+              {computed.paymentCycle.periodHint}
+            </p>
+          )}
           <SummaryRow
             label="المتبقي"
             value={`${fmt(computed.remaining)} د.أ`}

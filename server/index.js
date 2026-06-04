@@ -45,6 +45,7 @@ import {
   listDeletionRequests,
   reviewDeletionRequest,
 } from './deletionRequests.js';
+import { installProductionStatic } from './staticAssets.js';
 
 const app = express();
 const PORT = Number(process.env.API_PORT) || 3001;
@@ -109,6 +110,20 @@ app.post('/api/bootstrap/ensure-admin', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   try {
+    if (process.env.AUTH_DISABLED === '1') {
+      const username = String(req.body?.username ?? 'admin').trim() || 'admin';
+      res.json({
+        token: 'dev-local',
+        user: {
+          id: 'local',
+          username,
+          displayName: process.env.ADMIN_DISPLAY_NAME?.trim() || 'مدير تجريبي',
+          role: 'admin',
+          active: true,
+        },
+      });
+      return;
+    }
     const username = String(req.body?.username ?? '');
     const password = String(req.body?.password ?? '');
     const result = await login(username, password);
@@ -504,13 +519,7 @@ const serveStatic =
 if (serveStatic) {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const distDir = path.join(__dirname, '..', 'dist');
-  app.use(express.static(distDir));
-  app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api')) return next();
-    res.sendFile(path.join(distDir, 'index.html'), (err) => {
-      if (err) next(err);
-    });
-  });
+  installProductionStatic(app, distDir);
 }
 
 async function main() {

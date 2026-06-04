@@ -22,12 +22,21 @@ export default defineConfig(({ mode }) => {
         },
       },
       plugins: [react()],
+      preview: {
+        port: 4173,
+        proxy: {
+          '/api': {
+            target: apiTarget,
+            changeOrigin: true,
+          },
+        },
+      },
       build: {
         rollupOptions: {
           output: {
-            manualChunks: {
-              recharts: ['recharts'],
-              exceljs: ['exceljs'],
+            manualChunks(id) {
+              if (id.includes('node_modules/recharts')) return 'recharts';
+              if (id.includes('node_modules/exceljs')) return 'exceljs';
             },
           },
         },

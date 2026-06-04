@@ -9,6 +9,9 @@ data/*.db-wal
 data/*.db-shm
 .vscode
 .idea
+.cursor
+.env.test
 *.bat
+deploy/node_modules
 agent-transcripts
 terminals

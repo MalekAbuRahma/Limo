@@ -4,6 +4,7 @@ import { migrateLicense } from './taxiLicenses';
 import { migrateOilChange } from './taxiOilChange';
 import { formatMonthLabel, normalizeExpenseDetails, sumExpenses } from './taxiCalculations';
 import { settleDriverPayments, sumDriverPayments } from './taxiDriverPayments';
+import { migratePaymentSettings, resolvePaymentAnchor } from './taxiPaymentSettings';
 
 const STORAGE_KEY = 'taxi_tracker_data';
 
@@ -30,7 +31,7 @@ export function migrateSettings(
   merged.comfortableReading = merged.comfortableReading ?? false;
   merged.vehicleImage = merged.vehicleImage ?? '';
   merged.ownerName = merged.ownerName ?? '';
-  return merged;
+  return { ...merged, ...migratePaymentSettings(merged) };
 }
 
 export function migrateEntry(raw: Partial<MonthlyEntry> & { id: string }): MonthlyEntry {
@@ -41,13 +42,25 @@ export function migrateEntry(raw: Partial<MonthlyEntry> & { id: string }): Month
   const date = raw.date || new Date().toISOString().slice(0, 10);
   const revenue = raw.revenue ?? 0;
   const guarantee = raw.monthlyGuarantee ?? DEFAULT_SETTINGS.monthlyGuarantee;
+  const anchor = resolvePaymentAnchor(
+    {
+      date,
+      paymentAnchorDate: raw.paymentAnchorDate,
+      paymentCycleEpoch: raw.paymentCycleEpoch,
+      workStartDate: raw.workStartDate,
+    },
+    {
+      driverFirstPaymentDate: undefined,
+      paymentCycleEpoch: raw.paymentCycleEpoch,
+    }
+  );
   const driverPayments = settleDriverPayments(
     raw.driverPayments,
     raw.driverPaid,
     date,
     revenue,
     guarantee,
-    raw.workStartDate
+    anchor
   );
   const driverPaid = sumDriverPayments(driverPayments);
   return {
@@ -63,6 +76,8 @@ export function migrateEntry(raw: Partial<MonthlyEntry> & { id: string }): Month
     driverPayments,
     paymentComplete: raw.paymentComplete ?? false,
     workStartDate: raw.workStartDate?.trim() || undefined,
+    paymentAnchorDate: raw.paymentAnchorDate?.trim() || undefined,
+    paymentCycleEpoch: raw.paymentCycleEpoch,
     monthlyGuarantee: raw.monthlyGuarantee ?? DEFAULT_SETTINGS.monthlyGuarantee,
   };
 }

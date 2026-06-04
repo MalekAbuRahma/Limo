@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 /**
- * Non-interactive deploy via SSH (password from DEPLOY_SSH_PASSWORD).
- * Usage: DEPLOY_SSH_PASSWORD='...' node deploy/deploy-remote.mjs
+ * Non-interactive deploy via SSH (password from DEPLOY_SSH_PASSWORD or deploy/.env.deploy).
+ * Usage: npm run deploy
  */
 import { Client } from 'ssh2';
-import { execSync } from 'child_process';
-import { readFileSync, existsSync } from 'fs';
+import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
+import { requireDeployPassword } from './load-deploy-env.mjs';
+import { createDeployArchive } from './create-archive.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, '..');
@@ -18,10 +19,7 @@ const password = process.env.DEPLOY_SSH_PASSWORD;
 const remoteDir = process.env.DEPLOY_DIR || '/opt/fleetflow';
 const appPort = process.env.APP_PORT || '8080';
 
-if (!password) {
-  console.error('Set DEPLOY_SSH_PASSWORD');
-  process.exit(1);
-}
+requireDeployPassword();
 
 function exec(conn, cmd, timeoutMs = 600000) {
   return new Promise((resolve, reject) => {
@@ -47,6 +45,8 @@ function exec(conn, cmd, timeoutMs = 600000) {
         .stderr.on('data', (d) => {
           const s = d.toString();
           errOut += s;
+          const line = s.trim();
+          if (line.includes('SCHILY.fflags')) return;
           process.stderr.write(s);
         });
     });
@@ -74,11 +74,9 @@ function connect() {
 
 const archive = join(process.env.TEMP || '/tmp', 'fleetflow-deploy.tar.gz');
 console.log('Creating archive...');
-execSync(
-  `tar -czf "${archive}" --exclude=node_modules --exclude=dist --exclude=.git --exclude="*.bat" --exclude=data --exclude=.env --exclude=.env.local --exclude=.env.deploy .`,
-  { cwd: projectRoot, stdio: 'inherit' }
-);
+createDeployArchive(projectRoot, archive);
 
+const { readFileSync } = await import('fs');
 const setupSh = readFileSync(join(__dirname, 'setup-server.sh'), 'utf8');
 
 const conn = await connect();
@@ -128,7 +126,7 @@ GEMINI_API_KEY=
   console.log('\n--- Docker build & start (this can take several minutes) ---');
   await exec(
     conn,
-    `cd ${remoteDir} && docker compose --env-file .env -f docker-compose.prod.yml up -d --build`,
+    `cd ${remoteDir} && docker compose --env-file .env -f docker-compose.prod.yml build --no-cache app && docker compose --env-file .env -f docker-compose.prod.yml up -d`,
     900000
   );
 
@@ -138,12 +136,26 @@ GEMINI_API_KEY=
     `for i in 1 2 3 4 5 6; do curl -sf http://127.0.0.1:${appPort}/api/health && exit 0; sleep 3; done; exit 1`
   );
   console.log('\nHealth:', health.trim());
+
+  const homeHtml = await exec(
+    conn,
+    `curl -sf http://127.0.0.1:${appPort}/ | head -c 4000`
+  );
+  if (homeHtml.includes('index.tsx')) {
+    throw new Error('Homepage still serves dev index.html (index.tsx) — build or cache issue');
+  }
+  if (!homeHtml.includes('/assets/')) {
+    throw new Error('Homepage missing /assets/ bundle references');
+  }
+  console.log('Homepage: production bundle OK');
+
   console.log(`\nDeployed: http://${host}:${appPort}/`);
 } finally {
   conn.end();
   if (existsSync(archive)) {
     try {
-      execSync(`del /f "${archive}"`, { stdio: 'ignore', shell: true });
+      const { unlinkSync } = await import('fs');
+      unlinkSync(archive);
     } catch {
       /* ignore */
     }

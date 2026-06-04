@@ -8,6 +8,14 @@ alwaysApply: false
 
 Applies when editing `deploy/` or running deploy commands. See also `pre-deploy-quality-gate.mdc` and `deploy/DEPLOY.md`.
 
+## User approval required (mandatory)
+
+**Never run production deploy, `git push` for release, `db:push`, or `users:push` unless the user explicitly approves in the current conversation** (e.g. "deploy", "redeploy", "push to production").
+
+After `npm run test:all` passes, summarize changes and ask: *"Tests passed. Deploy to production?"* — wait for yes before running deploy scripts.
+
+Commit locally only when the user asks to commit.
+
 ## Hard blocker — run first
 
 From `fleetflow---car-rental-&-finance-dashboard/`:

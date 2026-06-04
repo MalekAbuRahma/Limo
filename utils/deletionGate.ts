@@ -1,4 +1,4 @@
-import type { UiLanguage } from '../components/TaxiLogin';
+import type { UiLanguage } from '../types/uiLanguage';
 import type { UserSession } from './taxiAuth';
 import { isAdmin } from './permissions';
 import { checkApiHealth } from './taxiApi';

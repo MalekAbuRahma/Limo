@@ -207,6 +207,9 @@ export async function buildVehicleState(vehicleId) {
     vehicleCost: v.vehicleCost,
     vehicleLifeYears: v.vehicleLifeYears,
     insuranceReceivedTotal: v.insuranceReceivedTotal,
+    driverFirstPaymentDate: v.driverFirstPaymentDate || undefined,
+    driverPaymentMode: v.driverPaymentMode === 'deferred' ? 'deferred' : 'advance',
+    paymentCycleEpoch: v.paymentCycleEpoch ?? 0,
     fontSize: global.fontSize,
     displayTheme: global.displayTheme,
     boldNumbers: global.boldNumbers,
@@ -252,8 +255,9 @@ export async function saveVehicleState(vehicleId, state) {
     await client.query(
       `UPDATE vehicles SET
         label = $1, vehicle_image = $2, owner_name = $3, monthly_guarantee = $4, current_driver_name = $5,
-        vehicle_cost = $6, vehicle_life_years = $7, insurance_received_total = $8
-      WHERE id = $9`,
+        vehicle_cost = $6, vehicle_life_years = $7, insurance_received_total = $8,
+        driver_first_payment_date = $9, driver_payment_mode = $10, payment_cycle_epoch = $11
+      WHERE id = $12`,
       [
         settings.vehicleLabel ?? '',
         settings.vehicleImage ?? '',
@@ -263,6 +267,9 @@ export async function saveVehicleState(vehicleId, state) {
         settings.vehicleCost ?? 0,
         settings.vehicleLifeYears ?? 7,
         settings.insuranceReceivedTotal ?? 0,
+        settings.driverFirstPaymentDate ?? '',
+        settings.driverPaymentMode === 'deferred' ? 'deferred' : 'advance',
+        settings.paymentCycleEpoch ?? 0,
         vehicleId,
       ]
     );
@@ -336,8 +343,8 @@ export async function saveVehicleState(vehicleId, state) {
           expense_office, expense_insurance, expense_oil, expense_maintenance,
           expense_accident, expense_commission, expense_other, notes, driver_paid,
           driver_payment_1, driver_payment_2, driver_payment_3, monthly_guarantee, payment_complete,
-          work_start_date
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
+          work_start_date, payment_anchor_date, payment_cycle_epoch
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
         [
           e.id,
           vehicleId,
@@ -361,6 +368,8 @@ export async function saveVehicleState(vehicleId, state) {
           e.monthlyGuarantee ?? null,
           Boolean(e.paymentComplete),
           e.workStartDate ?? '',
+          e.paymentAnchorDate ?? '',
+          e.paymentCycleEpoch ?? 0,
         ]
       );
     }

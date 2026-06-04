@@ -8,13 +8,22 @@ import { formatInteger } from './taxiFormat';
 import {
   settleDriverPayments,
   sumDriverPayments,
-  entryTotalDue,
   getRentScheduleForEntry,
+  getPaymentCycleForEntry,
   type DriverPaymentTriple,
+  type PaymentMode,
 } from './taxiDriverPayments';
 import type { RentSchedule } from './taxiRentSchedule';
+import type { PaymentCycleResult } from './taxiPaymentCycle';
+import type { TaxiSettings } from '../taxiTypes';
+import { resolvePaymentAnchor } from './taxiPaymentSettings';
+import * as monthKeyUtil from './taxiMonthKey';
 
-export type PaymentStatus = 'مكتمل' | 'غير مكتمل';
+export const formatMonthLabel = monthKeyUtil.formatMonthLabel;
+export const formatMonthNumber = monthKeyUtil.formatMonthNumber;
+export const monthKey = monthKeyUtil.monthKey;
+
+export type PaymentStatus = 'مكتمل' | 'مدفوع جزئياً' | 'غير مكتمل';
 
 export function getRemaining(guarantee: number, driverPaid: number): number {
   return Math.max(0, guarantee - driverPaid);
@@ -25,7 +34,7 @@ export function isEntryMonthBeforeCurrent(
   entryDate: string,
   now: Date = new Date()
 ): boolean {
-  const mk = monthKey(entryDate);
+  const mk = monthKeyUtil.monthKey(entryDate);
   if (!mk) return false;
   const [y, m] = mk.split('-').map(Number);
   const cy = now.getFullYear();
@@ -40,50 +49,33 @@ export function isPaymentSettled(remaining: number, paymentComplete: boolean): b
 
 export function resolvePaymentStatus(
   remaining: number,
-  paymentComplete: boolean
+  paymentComplete: boolean,
+  totalPaid = 0,
+  totalDue = 0
 ): PaymentStatus {
-  return isPaymentSettled(remaining, paymentComplete) ? 'مكتمل' : 'غير مكتمل';
+  if (paymentComplete || remaining <= 0) return 'مكتمل';
+  if (totalPaid > 0 && remaining > 0) return 'مدفوع جزئياً';
+  return 'غير مكتمل';
 }
 
 export function paymentStatusBadgeClass(status: PaymentStatus): string {
   if (status === 'غير مكتمل') return 'bg-red-100 text-red-700';
+  if (status === 'مدفوع جزئياً') return 'bg-amber-100 text-amber-800';
   return 'bg-green-100 text-green-700';
+}
+
+export function cycleStatusToEntryStatus(
+  cycle: PaymentCycleResult,
+  paymentComplete: boolean
+): PaymentStatus {
+  if (paymentComplete || cycle.aggregateStatus === 'paid') return 'مكتمل';
+  if (cycle.aggregateStatus === 'partial') return 'مدفوع جزئياً';
+  return 'غير مكتمل';
 }
 
 /** @deprecated use resolvePaymentStatus */
 export function getPaymentStatus(remaining: number): PaymentStatus {
   return remaining > 0 ? 'غير مكتمل' : 'مكتمل';
-}
-
-/** شهر بأرقام: MM/YYYY مثل 05/2026 */
-export function formatMonthLabel(dateStr: string): string {
-  if (!dateStr) return '';
-  const parts = dateStr.split('-');
-  if (parts.length >= 2) {
-    const y = parts[0];
-    const m = parts[1].padStart(2, '0');
-    return `${m}/${y}`;
-  }
-  const d = new Date(dateStr + 'T12:00:00');
-  if (isNaN(d.getTime())) return dateStr;
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  return `${m}/${d.getFullYear()}`;
-}
-
-/** رقم الشهر فقط: 1–12 */
-export function formatMonthNumber(dateStr: string): string {
-  if (!dateStr) return '';
-  const parts = dateStr.split('-');
-  if (parts.length >= 2) return String(parseInt(parts[1], 10));
-  const d = new Date(dateStr + 'T12:00:00');
-  if (isNaN(d.getTime())) return '';
-  return String(d.getMonth() + 1);
-}
-
-export function monthKey(dateStr: string): string {
-  if (!dateStr) return '';
-  const [y, m] = dateStr.split('-');
-  return y && m ? `${y}-${m}` : dateStr;
 }
 
 export function sumExpenses(details: ExpenseBreakdown): number {
@@ -108,9 +100,9 @@ export function oilExpenseForEntry(
     return linked.reduce((s, o) => s + (o.cost || 0), 0);
   }
 
-  const mk = monthKey(entry.date);
+  const mk = monthKeyUtil.monthKey(entry.date);
   const monthRecords = oilChanges.filter(
-    (o) => !o.entryId && monthKey(o.changeDate) === mk
+    (o) => !o.entryId && monthKeyUtil.monthKey(o.changeDate) === mk
   );
   if (monthRecords.length > 0) {
     return monthRecords.reduce((s, o) => s + (o.cost || 0), 0);
@@ -127,8 +119,8 @@ export function orphanOilExpense(
   let total = 0;
   for (const o of oilChanges) {
     if (o.entryId) continue;
-    const mk = monthKey(o.changeDate);
-    const hasEntry = entries.some((e) => monthKey(e.date) === mk);
+    const mk = monthKeyUtil.monthKey(o.changeDate);
+    const hasEntry = entries.some((e) => monthKeyUtil.monthKey(e.date) === mk);
     if (!hasEntry) total += o.cost || 0;
   }
   return total;
@@ -163,12 +155,13 @@ export function normalizeExpenseDetails(
 
 export interface EntryComputed extends MonthlyEntry {
   guarantee: number;
-  /** المطلوب من السائق (إيراد الشهر بعد التناسب إن وُجد تاريخ بدء) */
+  /** المطلوب من السائق (دورة ١٠ أيام في شهر السجل) */
   totalDue: number;
   driverPayments: DriverPaymentTriple;
   installmentTargets: DriverPaymentTriple;
-  /** جدول الدفع لهذا الشهر */
   rentSchedule: RentSchedule;
+  paymentCycle: PaymentCycleResult;
+  paymentMode: PaymentMode;
   remaining: number;
   status: PaymentStatus;
   net: number;
@@ -177,30 +170,49 @@ export interface EntryComputed extends MonthlyEntry {
 export function computeEntry(
   entry: MonthlyEntry,
   defaultGuarantee: number,
-  oilChanges: OilChangeRecord[] = []
+  oilChanges: OilChangeRecord[] = [],
+  paymentMode: PaymentMode = 'advance',
+  vehicleSettings?: Pick<TaxiSettings, 'driverFirstPaymentDate' | 'paymentCycleEpoch'>
 ): EntryComputed {
+  const paymentAnchor = vehicleSettings
+    ? resolvePaymentAnchor(entry, vehicleSettings)
+    : entry.paymentAnchorDate?.trim() || entry.workStartDate?.trim();
   const expenseDetails = entryExpenseDetails(entry, oilChanges);
   const expenses = sumExpenses(expenseDetails);
   const guarantee = entry.monthlyGuarantee ?? defaultGuarantee;
-  const rentSchedule = getRentScheduleForEntry(
-    entry.date,
-    entry.revenue,
-    guarantee,
-    entry.workStartDate
-  );
-  const installmentTargets = rentSchedule.slotTargets as DriverPaymentTriple;
+  const paymentComplete = Boolean(entry.paymentComplete);
   const driverPayments = settleDriverPayments(
     entry.driverPayments,
     entry.driverPaid,
     entry.date,
     entry.revenue,
     guarantee,
-    entry.workStartDate
+    paymentAnchor,
+    paymentMode,
+    paymentComplete
   );
+  const paymentCycle = getPaymentCycleForEntry(
+    entry.date,
+    entry.revenue,
+    guarantee,
+    paymentAnchor,
+    paymentMode,
+    driverPayments,
+    paymentComplete
+  );
+  const rentSchedule = getRentScheduleForEntry(
+    entry.date,
+    entry.revenue,
+    guarantee,
+    paymentAnchor,
+    paymentMode,
+    driverPayments,
+    paymentComplete
+  );
+  const installmentTargets = rentSchedule.slotTargets as DriverPaymentTriple;
   const driverPaid = sumDriverPayments(driverPayments);
-  const totalDue = rentSchedule.totalDue;
-  const remaining = getRemaining(totalDue, driverPaid);
-  const paymentComplete = Boolean(entry.paymentComplete);
+  const totalDue = paymentCycle.totalExpected;
+  const remaining = paymentCycle.totalRemaining;
   return {
     ...entry,
     expenseDetails,
@@ -208,13 +220,15 @@ export function computeEntry(
     driverPayments,
     driverPaid,
     paymentComplete,
-    month: formatMonthLabel(entry.date),
+    month: monthKeyUtil.formatMonthLabel(entry.date),
     guarantee,
     totalDue,
     installmentTargets,
     rentSchedule,
+    paymentCycle,
+    paymentMode,
     remaining,
-    status: resolvePaymentStatus(remaining, paymentComplete),
+    status: cycleStatusToEntryStatus(paymentCycle, paymentComplete),
     net: entry.revenue - expenses,
   };
 }
@@ -260,9 +274,13 @@ export interface DashboardTotals {
 export function computeDashboard(
   entries: MonthlyEntry[],
   guarantee: number,
-  oilChanges: OilChangeRecord[] = []
+  oilChanges: OilChangeRecord[] = [],
+  paymentMode: PaymentMode = 'advance',
+  vehicleSettings?: Pick<TaxiSettings, 'driverFirstPaymentDate' | 'paymentCycleEpoch'>
 ): DashboardTotals {
-  const computed = entries.map((e) => computeEntry(e, guarantee, oilChanges));
+  const computed = entries.map((e) =>
+    computeEntry(e, guarantee, oilChanges, paymentMode, vehicleSettings)
+  );
   const expenseByCategory = computeExpenseTotals(entries, oilChanges);
   const orphanOil = orphanOilExpense(entries, oilChanges);
   const totalExpenses =
@@ -274,7 +292,7 @@ export function computeDashboard(
     netProfit: totalRevenue - totalExpenses,
     totalPaid: computed.reduce((s, e) => s + e.driverPaid, 0),
     totalRemaining: computed.reduce((s, e) => s + e.remaining, 0),
-    lateCount: computed.filter((e) => e.status === 'غير مكتمل').length,
+    lateCount: computed.filter((e) => e.status !== 'مكتمل').length,
     paidCount: computed.filter((e) => e.status === 'مكتمل').length,
     expenseByCategory,
   };
@@ -293,7 +311,7 @@ function addMonthsToDate(dateStr: string, months: number): string {
   const d = new Date(dateStr + 'T12:00:00');
   if (isNaN(d.getTime())) return '';
   d.setMonth(d.getMonth() + months);
-  return formatMonthLabel(
+  return monthKeyUtil.formatMonthLabel(
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
   );
 }

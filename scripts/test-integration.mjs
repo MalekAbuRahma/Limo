@@ -172,6 +172,9 @@ try {
       monthlyGuarantee: 760,
       insuranceReceivedTotal: 100,
       vehicleImage: TEST_VEHICLE_IMAGE,
+      driverFirstPaymentDate: '2026-08-08',
+      driverPaymentMode: 'deferred',
+      paymentCycleEpoch: 3,
     },
     accidents: [
       migrateAccident({
@@ -214,6 +217,9 @@ try {
         expenseDetails: { oil: 30, other: 0 },
         driverPaid: 760,
         monthlyGuarantee: 760,
+        paymentAnchorDate: '2026-01-15',
+        paymentCycleEpoch: 3,
+        driverPayments: [250, 250, 250],
       }),
     ],
   };
@@ -225,8 +231,17 @@ try {
   await closeDb();
 
   assert(loaded.settings.monthlyGuarantee === 760, 'postgres settings round-trip');
+  assert(loaded.settings.driverFirstPaymentDate === '2026-08-08', 'postgres driverFirstPaymentDate');
+  assert(loaded.settings.driverPaymentMode === 'deferred', 'postgres driverPaymentMode');
+  assert(loaded.settings.paymentCycleEpoch === 3, 'postgres paymentCycleEpoch (vehicle)');
   assert(loaded.entries.length === 1, 'postgres entries round-trip');
   assert(loaded.entries[0].driverName === 'أحمد', 'postgres driver name');
+  assert(loaded.entries[0].paymentAnchorDate === '2026-01-15', 'postgres paymentAnchorDate');
+  assert(loaded.entries[0].paymentCycleEpoch === 3, 'postgres paymentCycleEpoch (entry)');
+  assert(
+    loaded.entries[0].driverPayments?.join(',') === '250,250,250',
+    'postgres driverPayments slots'
+  );
   assert(loaded.entries[0].expenseDetails.oil === 30, 'postgres expense breakdown');
   assert(
     sumExpenses(loaded.entries[0].expenseDetails) === loaded.entries[0].expenses,

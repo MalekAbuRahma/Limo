@@ -1,8 +1,43 @@
 import {
-  computeRentSchedule,
+  computeWorkSpan,
   MAX_PAYMENT_SLOTS,
   type RentSchedule,
 } from './taxiRentSchedule';
+import type { PaymentCycleResult, PaymentMode } from './taxiPaymentCycle';
+import { buildPaymentCycle } from './taxiPaymentCycle';
+
+export type { PaymentMode };
+
+/** جدول ضمان الشهر — يبني على دورة الدفع كل ١٠ أيام */
+export function computeRentSchedule(
+  entryMonthDate: string,
+  monthlyRevenue: number,
+  fallbackGuarantee: number,
+  workStartDate?: string,
+  paymentMode?: PaymentMode,
+  paidSlots?: [number, number, number],
+  paymentComplete?: boolean
+): RentSchedule {
+  const monthlyBase = monthlyRevenue > 0 ? monthlyRevenue : fallbackGuarantee;
+  const cycle = buildPaymentCycle({
+    entryMonthDate,
+    monthlyRental: monthlyBase,
+    firstPaymentDate: workStartDate,
+    mode: paymentMode,
+    paidSlots,
+    paymentComplete,
+  });
+  const span = computeWorkSpan(entryMonthDate, workStartDate);
+  return {
+    monthlyRevenue: monthlyBase,
+    workSpan: span,
+    totalDue: cycle.totalExpected,
+    slotCount: cycle.slotCount,
+    slotTargets: [...cycle.slotTargets],
+    periodHint: cycle.periodHint,
+    dueDatesInMonth: cycle.dueDatesInMonth,
+  };
+}
 
 /** ثلاث خانات دفع كحد أقصى في قاعدة البيانات — قد تُستخدم دفعة واحدة أو اثنتان فقط */
 export const DRIVER_PAYMENT_COUNT = MAX_PAYMENT_SLOTS;
@@ -91,13 +126,18 @@ export function settleDriverPayments(
   entryMonthDate: string,
   revenue: number,
   fallbackGuarantee: number,
-  workStartDate?: string
+  workStartDate?: string,
+  paymentMode?: PaymentMode,
+  paymentComplete?: boolean
 ): DriverPaymentTriple {
   const schedule = computeRentSchedule(
     entryMonthDate,
     revenue,
     fallbackGuarantee,
-    workStartDate
+    workStartDate,
+    paymentMode,
+    undefined,
+    paymentComplete
   );
   return normalizeDriverPayments(raw, legacyPaid, schedule);
 }
@@ -106,9 +146,40 @@ export function getRentScheduleForEntry(
   entryMonthDate: string,
   revenue: number,
   fallbackGuarantee: number,
-  workStartDate?: string
+  workStartDate?: string,
+  paymentMode?: PaymentMode,
+  paidSlots?: DriverPaymentTriple,
+  paymentComplete?: boolean
 ): RentSchedule {
-  return computeRentSchedule(entryMonthDate, revenue, fallbackGuarantee, workStartDate);
+  return computeRentSchedule(
+    entryMonthDate,
+    revenue,
+    fallbackGuarantee,
+    workStartDate,
+    paymentMode,
+    paidSlots,
+    paymentComplete
+  );
+}
+
+export function getPaymentCycleForEntry(
+  entryMonthDate: string,
+  revenue: number,
+  fallbackGuarantee: number,
+  workStartDate?: string,
+  paymentMode?: PaymentMode,
+  paidSlots?: DriverPaymentTriple,
+  paymentComplete?: boolean
+): PaymentCycleResult {
+  const monthly = revenue > 0 ? revenue : fallbackGuarantee;
+  return buildPaymentCycle({
+    entryMonthDate,
+    monthlyRental: monthly,
+    firstPaymentDate: workStartDate,
+    mode: paymentMode,
+    paidSlots: paidSlots,
+    paymentComplete,
+  });
 }
 
 /** المطلوب من السائق (بعد التناسب إن وُجد تاريخ بدء) */
@@ -116,12 +187,19 @@ export function entryTotalDue(
   revenue: number,
   fallbackGuarantee: number,
   entryMonthDate?: string,
-  workStartDate?: string
+  workStartDate?: string,
+  paymentMode?: PaymentMode
 ): number {
   if (!entryMonthDate) {
     return revenue > 0 ? revenue : fallbackGuarantee;
   }
-  return computeRentSchedule(entryMonthDate, revenue, fallbackGuarantee, workStartDate).totalDue;
+  return computeRentSchedule(
+    entryMonthDate,
+    revenue,
+    fallbackGuarantee,
+    workStartDate,
+    paymentMode
+  ).totalDue;
 }
 
 /** تعبئة الدفعات النشطة بالكامل */

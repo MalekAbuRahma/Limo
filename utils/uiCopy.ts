@@ -1,4 +1,4 @@
-import type { UiLanguage } from '../components/TaxiLogin';
+import type { UiLanguage } from '../types/uiLanguage';
 
 export const loadingCopy = {
   ar: {

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import ProfileMenu from './ProfileMenu';
 import UsersAdminPanel from './UsersAdminPanel';
@@ -7,7 +7,7 @@ import DeletionApprovalsPanel, { DeletionApprovalsButton } from './DeletionAppro
 import HomeSettingsTab from './HomeSettingsTab';
 import { DisplayPreferencesPanel, SettingsSection } from './SettingsUi';
 import MonthlyEntryConfirmModal from './MonthlyEntryConfirmModal';
-import type { UiLanguage } from './TaxiLogin';
+import type { UiLanguage } from '../types/uiLanguage';
 import type { UserSession } from '../utils/taxiAuth';
 import {
   canClearAllEntries,
@@ -149,10 +149,24 @@ import {
   fullPaymentsForSchedule,
   type DriverPaymentTriple,
 } from '../utils/taxiDriverPayments';
-import { paymentSlotLabel, daysInCalendarMonth } from '../utils/taxiRentSchedule';
+import { paymentSlotLabelForCycle } from '../utils/taxiRentSchedule';
+import {
+  formatNextDueHint,
+  PAYMENT_MODE_LABELS,
+  generateDueDates,
+} from '../utils/taxiPaymentCycle';
+import { formatIsoDateDisplay } from '../utils/taxiCalendarIso';
+import {
+  applyPaymentCycleSettingsPatch,
+  resolvePaymentAnchor,
+  snapshotPaymentAnchorOnSave,
+  requiresFirstPaymentDateSetup,
+  isEntryOnPriorPaymentCycle,
+  isOnlyPaymentDateSettingsPatch,
+  type PaymentSetupPromptReason,
+} from '../utils/taxiPaymentSettings';
 
 type Tab = 'tracking' | 'dashboard' | 'insurance' | 'licenses' | 'oil' | 'settings';
-type HomeTab = 'fleet' | 'settings';
 
 const emptyForm = (defaultAmount = 750): Omit<MonthlyEntry, 'id'> => ({
   date: new Date().toISOString().slice(0, 7) + '-01',
@@ -430,7 +444,6 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
   const [isExporting, setIsExporting] = useState(false);
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [pendingDeletionCount, setPendingDeletionCount] = useState(0);
-  const [homeTab, setHomeTab] = useState<HomeTab>('fleet');
   const [showDisplayPanel, setShowDisplayPanel] = useState(false);
   const [oilDialogOpen, setOilDialogOpen] = useState(false);
   const [standaloneOilEdit, setStandaloneOilEdit] = useState<OilChangeRecord | 'new' | null>(
@@ -444,7 +457,16 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
     importedCount: number;
   } | null>(null);
   const [entryFormError, setEntryFormError] = useState('');
+  const [paymentSetupPrompt, setPaymentSetupPrompt] =
+    useState<PaymentSetupPromptReason | null>(null);
+  const [pendingDriverName, setPendingDriverName] = useState<string | null>(null);
   const skipSaveRef = useRef(true);
+
+  const { settings, entries, accidents, licenses, oilChanges } = state;
+
+  const persist = (next: TaxiAppState | ((prev: TaxiAppState) => TaxiAppState)) => {
+    setState(next);
+  };
 
   const showToast = useCallback((message: string, tone: AppToastTone = 'info') => {
     setToast({ message, tone });
@@ -456,6 +478,108 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
     (message: string, tone: AppToastTone = 'info') => showToast(message, tone),
     [showToast]
   );
+
+  const navigateToFirstPaymentDateSetup = useCallback(
+    (reason: PaymentSetupPromptReason) => {
+      setPaymentSetupPrompt(reason);
+      setShowForm(false);
+      setEditingId(null);
+      setTab('settings');
+      showToast(
+        reason === 'new_driver'
+          ? 'تم تغيير السائق — أدخل تاريخ أول دفعة في الإعدادات أدناه'
+          : 'حدّد تاريخ أول دفعة في الإعدادات قبل إضافة دفع ضمان',
+        'info'
+      );
+    },
+    [showToast]
+  );
+
+  const paymentSetupBlocking =
+    Boolean(paymentSetupPrompt) && requiresFirstPaymentDateSetup(settings);
+
+  const trySetTab = useCallback(
+    (next: Tab) => {
+      if (paymentSetupBlocking && next !== 'settings') {
+        showToast(
+          lang === 'ar'
+            ? 'أدخل تاريخ أول دفعة (تاريخ الاستلام) في الإعدادات أولاً'
+            : 'Enter the first payment / handover date in Settings first',
+          'error'
+        );
+        setTab('settings');
+        navigateToFirstPaymentDateSetup(
+          paymentSetupPrompt === 'new_driver' ? 'new_driver' : 'first_settlement'
+        );
+        return;
+      }
+      setTab(next);
+    },
+    [
+      paymentSetupBlocking,
+      lang,
+      showToast,
+      navigateToFirstPaymentDateSetup,
+      paymentSetupPrompt,
+    ]
+  );
+
+  const handleVehicleSettingsChange = useCallback(
+    (next: TaxiSettings) => {
+      if (
+        paymentSetupBlocking &&
+        requiresFirstPaymentDateSetup(next) &&
+        !isOnlyPaymentDateSettingsPatch(settings, next)
+      ) {
+        showToast(
+          lang === 'ar'
+            ? 'أدخل تاريخ أول دفعة قبل تعديل باقي إعدادات السيارة'
+            : 'Enter the first payment date before changing other vehicle settings',
+          'error'
+        );
+        return;
+      }
+
+      const patched = applyPaymentCycleSettingsPatch(settings, next);
+      persist({ ...state, settings: patched });
+
+      if (patched.driverFirstPaymentDate?.trim() && paymentSetupPrompt) {
+        setPaymentSetupPrompt(null);
+        showToast('تم حفظ تاريخ أول دفعة — يمكنك إضافة دفع ضمان من المتابعة', 'info');
+      }
+    },
+    [
+      settings,
+      state,
+      persist,
+      paymentSetupPrompt,
+      paymentSetupBlocking,
+      showToast,
+      lang,
+    ]
+  );
+
+  const requestDriverNameChange = useCallback((newName: string) => {
+    const prev = settings.currentDriverName?.trim() ?? '';
+    const next = newName.trim();
+    if (!next || next === prev) return;
+    setPendingDriverName(next);
+  }, [settings.currentDriverName]);
+
+  const confirmDriverNameChange = useCallback(() => {
+    if (!pendingDriverName) return;
+    const patched = applyPaymentCycleSettingsPatch(settings, {
+      ...settings,
+      currentDriverName: pendingDriverName,
+    });
+    persist({ ...state, settings: patched });
+    setPendingDriverName(null);
+    navigateToFirstPaymentDateSetup('new_driver');
+  }, [pendingDriverName, settings, state, persist, navigateToFirstPaymentDateSetup]);
+
+  const cancelDriverNameChange = useCallback(() => {
+    setPendingDriverName(null);
+  }, []);
 
   const filterFleetForSession = useCallback(
     (data: FleetData): FleetData => ({
@@ -614,19 +738,27 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
     return () => window.clearInterval(id);
   }, []);
 
-  const { settings, entries, accidents, licenses, oilChanges } = state;
   const oilChangeAlert = useMemo(() => getOilChangeAlert(oilChanges), [oilChanges]);
   const guarantee = settings.monthlyGuarantee;
 
   const computedEntries = useMemo(() => {
     return [...entries]
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      .map((e) => computeEntry(e, guarantee, oilChanges));
-  }, [entries, guarantee, oilChanges]);
+      .map((e) =>
+        computeEntry(e, guarantee, oilChanges, settings.driverPaymentMode ?? 'advance', settings)
+      );
+  }, [entries, guarantee, oilChanges, settings]);
 
   const baseTotals = useMemo(
-    () => computeDashboard(entries, guarantee, oilChanges),
-    [entries, guarantee, oilChanges]
+    () =>
+      computeDashboard(
+        entries,
+        guarantee,
+        oilChanges,
+        settings.driverPaymentMode ?? 'advance',
+        settings
+      ),
+    [entries, guarantee, oilChanges, settings]
   );
 
   const accidentSummary = useMemo(
@@ -673,10 +805,6 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
       ),
     [computedEntries, settings.vehicleCost, settings.vehicleLifeYears]
   );
-
-  const persist = (next: TaxiAppState | ((prev: TaxiAppState) => TaxiAppState)) => {
-    setState(next);
-  };
 
   const persistImmediate = (
     updater: (prev: TaxiAppState) => TaxiAppState
@@ -866,6 +994,10 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
   };
 
   const openAdd = () => {
+    if (requiresFirstPaymentDateSetup(settings)) {
+      navigateToFirstPaymentDateSetup('first_settlement');
+      return;
+    }
     const today = new Date().toISOString().slice(0, 10);
     setEditingId(null);
     setEntryFormError('');
@@ -881,7 +1013,13 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
   const openEdit = (entry: MonthlyEntry) => {
     setEditingId(entry.id);
     setEntryFormError('');
-    const computed = computeEntry(entry, guarantee, oilChanges);
+    const computed = computeEntry(
+      entry,
+      guarantee,
+      oilChanges,
+      settings.driverPaymentMode ?? 'advance',
+      settings
+    );
     const formDetails = {
       ...normalizeExpenseDetails(entry.expenseDetails, entry.expenses),
       oil: 0,
@@ -896,7 +1034,6 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
       notes: entry.notes ?? '',
       driverPaid: computed.driverPaid,
       driverPayments: [...computed.driverPayments],
-      workStartDate: entry.workStartDate,
       paymentComplete: Boolean(entry.paymentComplete),
     });
     setShowForm(true);
@@ -932,16 +1069,27 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
     };
     const expenses = sumExpenses(expenseDetails);
     const existing = editingId ? entries.find((x) => x.id === editingId) : undefined;
+    const anchorDraft = resolvePaymentAnchor(
+      {
+        date: form.date,
+        paymentAnchorDate: existing?.paymentAnchorDate,
+        paymentCycleEpoch: existing?.paymentCycleEpoch,
+        workStartDate: existing?.workStartDate,
+      },
+      settings
+    );
     const driverPayments = settleDriverPayments(
       form.driverPayments,
       undefined,
       form.date,
       form.revenue,
       existing?.monthlyGuarantee ?? guarantee,
-      form.workStartDate
+      anchorDraft,
+      settings.driverPaymentMode ?? 'advance',
+      form.paymentComplete
     );
     const driverPaid = sumDriverPayments(driverPayments);
-    const entry: MonthlyEntry = {
+    let entry: MonthlyEntry = {
       id: editingId ?? Date.now().toString(),
       ...form,
       expenseDetails,
@@ -952,7 +1100,10 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
       month: formatMonthLabel(form.date),
       driverName: form.driverName.trim() || settings.currentDriverName || '—',
       monthlyGuarantee: existing?.monthlyGuarantee ?? guarantee,
+      workStartDate: undefined,
     };
+    const snapshot = snapshotPaymentAnchorOnSave(entry, settings);
+    entry = { ...entry, ...snapshot };
 
     const duplicate = entries.some(
       (x) => x.id !== editingId && monthKey(x.date) === monthKey(entry.date)
@@ -972,6 +1123,10 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
   const handleSaveEntry = (e: React.FormEvent) => {
     e.preventDefault();
     setEntryFormError('');
+    if (requiresFirstPaymentDateSetup(settings)) {
+      navigateToFirstPaymentDateSetup('first_settlement');
+      return;
+    }
     const entry = buildEntryFromForm();
     if (!entry) return;
     setPendingEntry(entry);
@@ -1169,7 +1324,8 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
       entry.date,
       entry.revenue,
       entry.monthlyGuarantee ?? guarantee,
-      entry.workStartDate
+      entry.workStartDate,
+      settings.driverPaymentMode ?? 'advance'
     );
     const driverPayments = fullPaymentsForSchedule(schedule);
     const driverPaid = sumDriverPayments(driverPayments);
@@ -1275,45 +1431,19 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
               }}
               onOpenAccessibility={() => setShowDisplayPanel(true)}
               onLogout={() => setShowLogoutConfirm(true)}
+              systemSettingsContent={
+                <HomeSettingsTab
+                  embedded
+                  session={session}
+                  lang={lang}
+                  storageSource={storageSource}
+                  vehicleCount={fleet?.vehicles.length ?? 0}
+                  onDeletionReviewed={(req) => void handleDeletionReviewed(req)}
+                />
+              }
             />
             </div>
           </div>
-          <nav className="home-page-nav border-b border-slate-200 bg-white" aria-label={lang === 'ar' ? 'تبويبات الصفحة الرئيسية' : 'Home page tabs'}>
-            <div className="home-page-nav__inner max-w-5xl mx-auto px-3 sm:px-4">
-              <div className="home-page-nav__tabs" role="tablist">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={homeTab === 'fleet'}
-                  onClick={() => setHomeTab('fleet')}
-                  className={`app-nav-tab flex-shrink-0 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-                    homeTab === 'fleet'
-                      ? 'border-blue-600 text-blue-700'
-                      : 'border-transparent text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  <span className="app-nav-tab-label">
-                    {lang === 'ar' ? 'الأسطول' : 'Fleet'}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={homeTab === 'settings'}
-                  onClick={() => setHomeTab('settings')}
-                  className={`app-nav-tab flex-shrink-0 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-                    homeTab === 'settings'
-                      ? 'border-blue-600 text-blue-700'
-                      : 'border-transparent text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  <span className="app-nav-tab-label">
-                    {lang === 'ar' ? 'الإعدادات' : 'Settings'}
-                  </span>
-                </button>
-              </div>
-            </div>
-          </nav>
         </header>
         <main className="app-layout__main vehicle-garage-page max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-5 w-full">
           {authError && (
@@ -1336,29 +1466,16 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
                   : 'No vehicles are assigned to your account. Ask an admin to assign a car to you in Settings.'}
               </div>
             )}
-          {homeTab === 'fleet' ? (
-            <VehicleGarage
-              session={session}
-              lang={lang}
-              vehicles={fleet?.vehicles ?? []}
-              onSelect={(id) => {
-                setHomeTab('fleet');
-                setSelectedVehicleId(id);
-              }}
-              onAddVehicle={handleAddVehicle}
-              onDeleteVehicle={
-                canDeleteVehicle(session) ? handleDeleteVehicle : undefined
-              }
-            />
-          ) : (
-            <HomeSettingsTab
-              session={session}
-              lang={lang}
-              storageSource={storageSource}
-              vehicleCount={fleet?.vehicles.length ?? 0}
-              onDeletionReviewed={(req) => void handleDeletionReviewed(req)}
-            />
-          )}
+          <VehicleGarage
+            session={session}
+            lang={lang}
+            vehicles={fleet?.vehicles ?? []}
+            onSelect={(id) => setSelectedVehicleId(id)}
+            onAddVehicle={handleAddVehicle}
+            onDeleteVehicle={
+              canDeleteVehicle(session) ? handleDeleteVehicle : undefined
+            }
+          />
         </main>
         <DisplayAccessibilityPanel
           open={showDisplayPanel}
@@ -1426,6 +1543,32 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
         }}
       />
       <ConfirmDialog
+        open={pendingDriverName != null}
+        title={lang === 'ar' ? 'تغيير السائق' : 'Driver change'}
+        message={
+          lang === 'ar' ? (
+            <>
+              تم تغيير السائق إلى <strong>{pendingDriverName}</strong>. يجب إدخال{' '}
+              <strong>تاريخ أول دفعة</strong> (تاريخ استلام السيارة من السائق الجديد) في
+              الإعدادات — السجلات الحالية تبقى على دورة الدفع السابقة حتى إعادة حفظها.
+            </>
+          ) : (
+            <>
+              Driver changed to <strong>{pendingDriverName}</strong>. Enter the{' '}
+              <strong>first payment date</strong> (vehicle handover) in Settings. Current entries
+              keep the previous payment cycle until you save them again.
+            </>
+          )
+        }
+        confirmLabel={lang === 'ar' ? 'متابعة — إدخال التاريخ' : 'Continue — enter date'}
+        cancelLabel={lang === 'ar' ? 'إلغاء' : 'Cancel'}
+        variant="neutral"
+        dir={appDir(lang)}
+        showIrreversibleNote={false}
+        onCancel={cancelDriverNameChange}
+        onConfirm={confirmDriverNameChange}
+      />
+      <ConfirmDialog
         open={importBackupConfirm != null}
         title={lang === 'ar' ? 'استيراد نسخة احتياطية' : 'Import backup'}
         message={
@@ -1479,6 +1622,8 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
           entry={pendingEntry}
           guarantee={guarantee}
           oilChanges={oilChanges}
+          paymentMode={settings.driverPaymentMode ?? 'advance'}
+          vehicleSettings={settings}
           isEditMode={Boolean(editingId)}
           onConfirm={handleConfirmSave}
           onBack={() => {
@@ -1517,7 +1662,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
               {licenseSummary.renewalAlerts.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setTab('licenses')}
+                  onClick={() => trySetTab('licenses')}
                   className="hidden sm:inline-flex items-center gap-1 px-2 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded-md text-xs font-medium hover:bg-amber-100"
                   title="عرض تنبيهات تجديد الترخيص"
                 >
@@ -1538,9 +1683,21 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
                 lang={lang}
                 setLang={setLang}
                 settings={settings}
-                onSettingsChange={(s) => persist({ ...state, settings: s })}
+                onSettingsChange={(s) =>
+                  persist({ ...state, settings: applyPaymentCycleSettingsPatch(settings, s) })
+                }
                 onOpenAccessibility={() => setShowDisplayPanel(true)}
                 onLogout={() => setShowLogoutConfirm(true)}
+                systemSettingsContent={
+                  <HomeSettingsTab
+                    embedded
+                    session={session}
+                    lang={lang}
+                    storageSource={storageSource}
+                    vehicleCount={fleet?.vehicles.length ?? 0}
+                    onDeletionReviewed={(req) => void handleDeletionReviewed(req)}
+                  />
+                }
               />
               <button
                 type="button"
@@ -1557,7 +1714,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
               <button
                 type="button"
                 className="font-semibold underline hover:text-amber-900"
-                onClick={() => setTab('settings')}
+                onClick={() => trySetTab('settings')}
               >
                 رفع الصورة من الإعدادات
               </button>
@@ -1574,7 +1731,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
                 type="button"
                 role="tab"
                 aria-selected={tab === t.id}
-                onClick={() => setTab(t.id)}
+                onClick={() => trySetTab(t.id)}
                 className={`app-nav-tab flex-shrink-0 px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium border-b-2 transition-colors ${
                   tab === t.id
                     ? 'border-blue-600 text-blue-700'
@@ -1600,7 +1757,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
             {tab === 'tracking' && (
               <button
                 type="button"
-                onClick={() => setTab('oil')}
+                onClick={() => trySetTab('oil')}
                 className="mr-2 mt-2 block text-amber-800 underline text-sm font-medium"
               >
                 عرض تبويب متابعة الزيت ←
@@ -1630,6 +1787,9 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
             paidCount={totals.paidCount}
             totalRemaining={totals.totalRemaining}
             formError={entryFormError}
+            driverPaymentMode={settings.driverPaymentMode ?? 'advance'}
+            vehiclePaymentSettings={settings}
+            paymentSetupBlocking={paymentSetupBlocking}
           />
         )}
         {tab === 'insurance' && (
@@ -1668,8 +1828,11 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
             settings={settings}
             entryCount={entries.length}
             session={session}
-            onOpenOilTab={() => setTab('oil')}
-            onChange={(s) => persist({ ...state, settings: s })}
+            onOpenOilTab={() => trySetTab('oil')}
+            onChange={handleVehicleSettingsChange}
+            onDriverNameCommit={requestDriverNameChange}
+            paymentSetupPrompt={paymentSetupPrompt}
+            paymentSetupBlocking={paymentSetupBlocking}
             onImageChange={(image) => {
               if (!hasVehicleImage(image)) {
                 showToast(VEHICLE_IMAGE_REQUIRED_MSG, 'error');
@@ -1691,7 +1854,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
             isExporting={isExporting}
             onExportExcel={handleExportExcel}
             onExportPdf={handleExportPdf}
-            onBack={() => setTab('tracking')}
+            onBack={() => trySetTab('tracking')}
             lang={lang}
             vehicleId={selectedVehicleId ?? ''}
             assignedUserId={currentVehicleMeta?.assignedUserId}
@@ -1717,24 +1880,12 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
         )}
       </main>
 
-      <div className="display-access-fab-wrap">
-        <button
-          type="button"
-          onClick={() => setShowDisplayPanel((v) => !v)}
-          className={`display-access-fab-btn ${showDisplayPanel ? 'display-access-fab-btn--active' : ''}`}
-          aria-expanded={showDisplayPanel}
-          aria-label="أدوات سهولة العرض — الحجم والألوان"
-          title="عرض وتكبير"
-        >
-          <AccessibilityIcon className="w-6 h-6" />
-        </button>
-      </div>
-
       <DisplayAccessibilityPanel
         open={showDisplayPanel}
         onClose={() => setShowDisplayPanel(false)}
         settings={settings}
-        onChange={(s) => persist({ ...state, settings: s })}
+        onChange={handleVehicleSettingsChange}
+        paymentSetupPrompt={paymentSetupPrompt}
       />
 
       <OilChangeDialog
@@ -1862,9 +2013,12 @@ const PayFullAmountConfirmDialog: React.FC<{
           </p>
         )}
         <p className="text-xs text-emerald-800 pt-1">
-          سيُسجَّل كـ ٣ دفعات ضمان:{' '}
+          سيُسجَّل كـ {entry.rentSchedule.slotCount} استحقاق:{' '}
           <span className="tabular-nums font-semibold">
-            {entry.installmentTargets.map((p) => fmt(p)).join(' + ')}
+            {Array.from({ length: entry.rentSchedule.slotCount }, (_, idx) => {
+              const due = paymentSlotLabelForCycle(idx, entry.paymentCycle.dueDatesInMonth);
+              return `${due} ${fmt(entry.installmentTargets[idx])}`;
+            }).join(' + ')}
           </span>
         </p>
       </div>
@@ -2097,8 +2251,7 @@ const PaginationBar: React.FC<{
 const PaymentStatusControl: React.FC<{
   row: EntryComputed;
 }> = ({ row }) => {
-  const isComplete = row.remaining <= 0;
-  const statusLabel = isComplete ? 'مكتمل' : 'غير مكتمل';
+  const statusLabel = row.status;
   const statusClass = paymentStatusBadgeClass(statusLabel);
 
   return (
@@ -2129,9 +2282,11 @@ const TrackingEntryCard: React.FC<{
     ? 'tracking-entry-card--editing'
     : row.status === 'غير مكتمل'
       ? 'tracking-entry-card--late'
-      : row.status === 'مكتمل'
-        ? 'tracking-entry-card--settled'
-        : '';
+      : row.status === 'مدفوع جزئياً'
+        ? 'tracking-entry-card--progress'
+        : row.status === 'مكتمل'
+          ? 'tracking-entry-card--settled'
+          : '';
 
   return (
     <article
@@ -2156,7 +2311,7 @@ const TrackingEntryCard: React.FC<{
         </div>
         <div className="tracking-entry-card__badges">
           <PaymentStatusControl row={row} />
-          {row.driverName?.trim() && (
+          {row.driverName?.trim() && row.driverName.trim() !== '—' && (
             <span className="tracking-entry-card__driver-chip" title="السائق">
               {row.driverName}
             </span>
@@ -2188,15 +2343,26 @@ const TrackingEntryCard: React.FC<{
           </dl>
           <div className="tracking-entry-card__finance-paid">
             <div className="tracking-entry-card__finance-paid-head">
-              <span className="tracking-entry-card__finance-paid-label">المدفوع (٣ دفعات ضمان)</span>
+              <span className="tracking-entry-card__finance-paid-label">
+                المدفوع ({row.rentSchedule.slotCount} استحقاق)
+              </span>
               <span className="tracking-entry-card__finance-paid-total tabular-nums">
-                {fmt(row.driverPaid)} د.أ
+                {fmt(row.driverPaid)} / {fmt(row.totalDue)} د.أ
               </span>
             </div>
             <p className="tracking-entry-card__finance-paid-breakdown tabular-nums">
-              <span>{row.driverPayments.map((p) => fmt(p)).join(' + ')}</span>
-              <span className="tracking-entry-card__finance-paid-sep">/</span>
-              <span>{fmt(row.totalDue)}</span>
+              {Array.from({ length: row.rentSchedule.slotCount }, (_, idx) => {
+                const dueLabel = paymentSlotLabelForCycle(
+                  idx,
+                  row.paymentCycle.dueDatesInMonth
+                );
+                return (
+                  <span key={`${dueLabel}-${idx}`}>
+                    {idx > 0 ? ' + ' : ''}
+                    {dueLabel} {fmt(row.driverPayments[idx])}
+                  </span>
+                );
+              })}
             </p>
           </div>
           {!isRowEditing && row.remaining > 0 && (
@@ -2284,10 +2450,14 @@ const EntryActionsMenu: React.FC<{
   onRequestPayFull,
 }) => {
   const [open, setOpen] = useState(false);
-  const [panelPos, setPanelPos] = useState({ top: 0, left: 0 });
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const portalRef = useRef<HTMLDivElement>(null);
+
+  const MENU_VIEWPORT_PAD = 8;
+  const MENU_FALLBACK_W = 176;
+  const MENU_FALLBACK_H = 120;
 
   const menuItems = (
     <>
@@ -2330,25 +2500,59 @@ const EntryActionsMenu: React.FC<{
     </>
   );
 
-  const updatePanelPosition = () => {
+  const updatePanelPosition = useCallback(() => {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    setPanelPos({ top: rect.bottom + 4, left: rect.left });
-  };
+    const panel = portalRef.current?.querySelector(
+      '.tracking-row-menu__panel'
+    ) as HTMLElement | null;
+    const menuW = panel?.offsetWidth ?? MENU_FALLBACK_W;
+    const menuH = panel?.offsetHeight ?? MENU_FALLBACK_H;
+
+    let top = rect.bottom + 4;
+    let left = rect.left;
+
+    if (left + menuW > window.innerWidth - MENU_VIEWPORT_PAD) {
+      left = window.innerWidth - menuW - MENU_VIEWPORT_PAD;
+    }
+    if (left < MENU_VIEWPORT_PAD) {
+      left = MENU_VIEWPORT_PAD;
+    }
+    if (top + menuH > window.innerHeight - MENU_VIEWPORT_PAD) {
+      top = Math.max(MENU_VIEWPORT_PAD, rect.top - menuH - 4);
+    }
+
+    setPanelPos({ top, left });
+  }, []);
 
   const toggleOpen = () => {
     setOpen((wasOpen) => {
       if (!wasOpen) {
-        updatePanelPosition();
+        const rect = triggerRef.current?.getBoundingClientRect();
+        if (rect) {
+          setPanelPos({
+            top: rect.bottom + 4,
+            left: Math.max(MENU_VIEWPORT_PAD, rect.left),
+          });
+        } else {
+          setPanelPos(null);
+        }
         return true;
       }
+      setPanelPos(null);
       return false;
     });
   };
 
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePanelPosition();
+    const id = requestAnimationFrame(() => updatePanelPosition());
+    return () => cancelAnimationFrame(id);
+  }, [open, updatePanelPosition]);
+
   useEffect(() => {
     if (!open) return;
-    if (variant === 'table') updatePanelPosition();
     const onPointerDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (rootRef.current?.contains(target)) return;
@@ -2400,13 +2604,8 @@ const EntryActionsMenu: React.FC<{
       >
         <IconDotsVertical />
       </button>
-      {open && variant === 'card' && (
-        <div className="tracking-row-menu__panel" role="menu">
-          {menuItems}
-        </div>
-      )}
       {open &&
-        variant === 'table' &&
+        panelPos &&
         typeof document !== 'undefined' &&
         createPortal(
           <div
@@ -2476,9 +2675,11 @@ const TrackingEntriesTable: React.FC<{
                     ? 'bg-amber-100 ring-2 ring-inset ring-amber-400'
                     : row.status === 'غير مكتمل'
                       ? 'bg-red-50/50'
-                      : row.status === 'مكتمل'
-                        ? 'bg-green-50/40'
-                        : ''
+                      : row.status === 'مدفوع جزئياً'
+                        ? 'bg-amber-50/60'
+                        : row.status === 'مكتمل'
+                          ? 'bg-green-50/40'
+                          : ''
                 }
               >
                 <td className="py-3 px-3 tabular-nums font-semibold text-slate-800 whitespace-nowrap">
@@ -2559,6 +2760,12 @@ interface TrackingTabProps {
   paidCount: number;
   totalRemaining: number;
   formError?: string;
+  driverPaymentMode: 'advance' | 'deferred';
+  vehiclePaymentSettings: Pick<
+    TaxiSettings,
+    'driverFirstPaymentDate' | 'paymentCycleEpoch' | 'driverPaymentMode'
+  >;
+  paymentSetupBlocking?: boolean;
 }
 
 const TrackingTab: React.FC<TrackingTabProps> = ({
@@ -2582,18 +2789,38 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
   paidCount,
   totalRemaining,
   formError,
+  driverPaymentMode,
+  vehiclePaymentSettings,
+  paymentSetupBlocking = false,
 }) => {
   const editingEntry = editingId ? entries.find((e) => e.id === editingId) : undefined;
+  const editingPriorCycle =
+    editingEntry &&
+    isEntryOnPriorPaymentCycle(editingEntry, vehiclePaymentSettings);
   const formGuarantee = editingEntry?.guarantee ?? guarantee;
+  const paymentAnchor = useMemo(
+    () =>
+      resolvePaymentAnchor(
+        {
+          date: form.date || '',
+          paymentAnchorDate: editingEntry?.paymentAnchorDate,
+          paymentCycleEpoch: editingEntry?.paymentCycleEpoch,
+          workStartDate: editingEntry?.workStartDate,
+        },
+        vehiclePaymentSettings
+      ),
+    [form.date, editingEntry, vehiclePaymentSettings]
+  );
   const rentSchedule = useMemo(
     () =>
       getRentScheduleForEntry(
         form.date || '',
         form.revenue || 0,
         formGuarantee,
-        form.workStartDate
+        paymentAnchor,
+        driverPaymentMode
       ),
-    [form.date, form.revenue, formGuarantee, form.workStartDate]
+    [form.date, form.revenue, formGuarantee, paymentAnchor, driverPaymentMode]
   );
   const installmentTargets = rentSchedule.slotTargets;
   const activeSlotCount = rentSchedule.slotCount;
@@ -2605,9 +2832,20 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
         form.date || '',
         form.revenue || 0,
         formGuarantee,
-        form.workStartDate
+        paymentAnchor,
+        driverPaymentMode,
+        form.paymentComplete
       ),
-    [form.driverPayments, form.driverPaid, form.date, form.revenue, formGuarantee, form.workStartDate]
+    [
+      form.driverPayments,
+      form.driverPaid,
+      form.date,
+      form.revenue,
+      formGuarantee,
+      paymentAnchor,
+      driverPaymentMode,
+      form.paymentComplete,
+    ]
   );
   const formPaidTotal = sumDriverPayments(formPayments);
   const previewTotalDue = rentSchedule.totalDue;
@@ -2616,14 +2854,34 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
     previewRemaining,
     Boolean(form.paymentComplete)
   );
+  const cyclePreviewDates = useMemo(() => {
+    const first = vehiclePaymentSettings.driverFirstPaymentDate?.trim();
+    if (!first) return [];
+    return generateDueDates(first, { maxCount: 6 }).map(formatIsoDateDisplay);
+  }, [vehiclePaymentSettings.driverFirstPaymentDate]);
+
+  const anchorForFormState = (f: Omit<MonthlyEntry, 'id'>) =>
+    resolvePaymentAnchor(
+      {
+        date: f.date || '',
+        paymentAnchorDate: editingEntry?.paymentAnchorDate,
+        paymentCycleEpoch: editingEntry?.paymentCycleEpoch,
+        workStartDate: editingEntry?.workStartDate,
+      },
+      vehiclePaymentSettings
+    );
 
   const setInstallment = (index: 0 | 1 | 2, value: number) => {
     onFormChange((f) => {
+      const anchor = anchorForFormState(f);
       const schedule = getRentScheduleForEntry(
         f.date || '',
         f.revenue || 0,
         formGuarantee,
-        f.workStartDate
+        anchor,
+        driverPaymentMode,
+        undefined,
+        f.paymentComplete
       );
       const targets = schedule.slotTargets;
       const payments = settleDriverPayments(
@@ -2632,7 +2890,9 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
         f.date || '',
         f.revenue || 0,
         formGuarantee,
-        f.workStartDate
+        anchor,
+        driverPaymentMode,
+        f.paymentComplete
       );
       const next: DriverPaymentTriple = [...payments];
       next[index] = clampInstallmentPayment(value, targets[index]);
@@ -2642,11 +2902,15 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
 
   const toggleInstallment = (index: 0 | 1 | 2) => {
     onFormChange((f) => {
+      const anchor = anchorForFormState(f);
       const schedule = getRentScheduleForEntry(
         f.date || '',
         f.revenue || 0,
         formGuarantee,
-        f.workStartDate
+        anchor,
+        driverPaymentMode,
+        undefined,
+        f.paymentComplete
       );
       const targets = schedule.slotTargets;
       const payments = settleDriverPayments(
@@ -2655,7 +2919,9 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
         f.date || '',
         f.revenue || 0,
         formGuarantee,
-        f.workStartDate
+        anchor,
+        driverPaymentMode,
+        f.paymentComplete
       );
       const next: DriverPaymentTriple = [...payments];
       const target = targets[index];
@@ -2689,13 +2955,6 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
     onMonthPickerChange(`${year}-${month}`);
   };
 
-  const periodYearNum = parseInt(periodYear, 10) || new Date().getFullYear();
-  const periodMonthNum = parseInt(periodMonth, 10) || 1;
-  const workStartMin = `${periodYear}-${periodMonth}-01`;
-  const workStartMax = `${periodYear}-${periodMonth}-${String(
-    daysInCalendarMonth(periodYearNum, periodMonthNum)
-  ).padStart(2, '0')}`;
-
   const setExpenseField = (key: keyof ExpenseBreakdown, value: number) => {
     onFormChange((f) => {
       const nextDetails = normalizeExpenseDetails(f.expenseDetails, f.expenses);
@@ -2713,6 +2972,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
   const [viewMode, setViewMode] = useState<TrackingViewMode>(loadTrackingViewMode);
   const [sortOrder, setSortOrder] = useState<EntrySortOrder>(loadTrackingSortOrder);
   const [showOptionalExpenses, setShowOptionalExpenses] = useState(false);
+  const [showEntryFilters, setShowEntryFilters] = useState(false);
 
   const driverOptions = useMemo(() => getUniqueDriverNames(entries), [entries]);
 
@@ -2847,19 +3107,20 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
       )}
 
       <div className="tracking-tab-toolbar">
-        <p className="text-sm text-slate-600 flex-1 min-w-0">
-          {isEditMode ? (
-            <span className="text-amber-700 font-medium">
-              أنت في وضع التعديل — عدّل الحقول ثم اضغط «مراجعة التعديلات»
-            </span>
-          ) : (
-            'أضف سجلاً واحداً لكل شهر'
-          )}
-        </p>
+        {isEditMode && (
+          <p className="text-sm text-amber-700 font-medium flex-1 min-w-0">
+            أنت في وضع التعديل — عدّل الحقول ثم اضغط «مراجعة التعديلات»
+          </p>
+        )}
         <button
           type="button"
           onClick={onOpenAdd}
-          disabled={isEditMode}
+          disabled={isEditMode || paymentSetupBlocking}
+          title={
+            paymentSetupBlocking
+              ? 'أدخل تاريخ أول دفعة في الإعدادات أولاً'
+              : undefined
+          }
           className="tracking-tab-add-btn"
         >
           + دفع ضمان
@@ -2940,23 +3201,33 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                 {form.month || formatMonthLabel(form.date)}
               </p>
             </label>
-            <label className="block">
-              <span className="text-xs font-medium text-slate-500">تاريخ بدء العمل (اختياري)</span>
-              <input
-                type="date"
-                min={workStartMin}
-                max={workStartMax}
-                value={form.workStartDate ?? ''}
-                onChange={(e) =>
-                  onFormChange((f) => ({
-                    ...f,
-                    workStartDate: e.target.value.trim() || undefined,
-                  }))
-                }
-                className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm tabular-nums entry-touch-input"
-              />
-              <p className="text-[11px] text-slate-500 mt-1">فارغ = من أول الشهر</p>
-            </label>
+            <div className="block sm:col-span-2 lg:col-span-1 rounded-lg border border-blue-100 bg-blue-50/80 px-3 py-2.5">
+              <p className="text-xs font-medium text-blue-900">دورة الدفع (إعدادات السيارة)</p>
+              <p className="text-[11px] text-blue-800 mt-1 tabular-nums">
+                تاريخ أول دفعة:{' '}
+                {vehiclePaymentSettings.driverFirstPaymentDate
+                  ? formatIsoDateDisplay(vehiclePaymentSettings.driverFirstPaymentDate)
+                  : '— غير محدد —'}
+              </p>
+              <p className="text-[11px] text-blue-800 mt-0.5 tabular-nums">
+                مرساة هذا السجل: {formatIsoDateDisplay(paymentAnchor)}
+              </p>
+              {editingPriorCycle && (
+                <p className="text-[11px] text-amber-900 mt-1 font-medium">
+                  دورة دفع قديمة — يُحدَّث الاحتساب عند إعادة حفظ السجل بعد ضبط الإعدادات.
+                </p>
+              )}
+              {cyclePreviewDates.length > 0 && (
+                <p className="text-[11px] text-slate-600 mt-1.5 leading-relaxed tabular-nums">
+                  التسلسل (+١٠ أيام): {cyclePreviewDates.join(' · ')}
+                </p>
+              )}
+              {!vehiclePaymentSettings.driverFirstPaymentDate && (
+                <p className="text-[11px] text-amber-800 mt-1.5">
+                  عيّن تاريخ أول دفعة من تبويب الإعدادات لهذه السيارة.
+                </p>
+              )}
+            </div>
             <label className="block sm:col-span-2 lg:col-span-1">
               <span className="text-xs font-medium text-slate-500">اسم السائق</span>
               <input
@@ -3006,13 +3277,13 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                   <div className="entry-installment-chips">
                     {Array.from({ length: activeSlotCount }, (_, idx) => {
                       const i = idx as 0 | 1 | 2;
-                      const label = paymentSlotLabel(i);
+                      const label = paymentSlotLabelForCycle(i, rentSchedule.dueDatesInMonth);
                       const target = installmentTargets[i];
                       const paid = formPayments[i];
                       const done = paid >= target && target > 0;
                       return (
                         <button
-                          key={label}
+                          key={`${label}-${i}`}
                           type="button"
                           onClick={() => toggleInstallment(i)}
                           className={`entry-installment-chip entry-installment-chip--btn ${
@@ -3055,12 +3326,12 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
               >
                 {Array.from({ length: activeSlotCount }, (_, idx) => {
                   const i = idx as 0 | 1 | 2;
-                  const label = paymentSlotLabel(i);
+                  const label = paymentSlotLabelForCycle(i, rentSchedule.dueDatesInMonth);
                   const target = installmentTargets[i];
                   const paid = formPayments[i];
                   const done = paid >= target && target > 0;
                   return (
-                    <div key={label} className="entry-installment-field">
+                    <div key={`${label}-${i}`} className="entry-installment-field">
                       <span className="text-xs font-medium text-slate-600 mb-1 block">
                         {label}
                         <span className="text-slate-400 font-normal tabular-nums">
@@ -3072,7 +3343,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                         type="number"
                         min={0}
                         max={target}
-                        step={target > 0 ? Math.min(50, target) : 1}
+                        step={1}
                         value={paid || ''}
                         onChange={(e) => setInstallment(i, Number(e.target.value) || 0)}
                         className={`entry-touch-input border rounded-lg px-2 py-2.5 text-base sm:text-sm bg-white tabular-nums w-full max-w-none ${
@@ -3197,102 +3468,71 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
       )}
 
       <div className="tracking-list-panel tracking-list-panel--formal bg-white border border-slate-200 rounded-xl shadow-sm p-4 space-y-3">
-        <div className="tracking-filters-row">
-          <label className="tracking-filters-search block">
-            <span className="sr-only">بحث</span>
-            <input
-              type="search"
-              value={filters.query}
-              onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))}
-              placeholder="بحث: شهر، سائق، مبلغ..."
-              className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-200 focus:border-blue-400 entry-touch-input"
-            />
-          </label>
-          <div className="tracking-filters-selects">
-            <select
-              value={filters.status}
-              onChange={(e) =>
-                setFilters((f) => ({ ...f, status: e.target.value as EntryFilters['status'] }))
-              }
-              className="tracking-filter-select entry-touch-input"
-              aria-label="تصفية الحالة"
+        <div className="tracking-filters-disclosure">
+          <div className="tracking-filters-disclosure__head">
+            <button
+              type="button"
+              className="tracking-filters-disclosure__toggle"
+              onClick={() => setShowEntryFilters((v) => !v)}
+              aria-expanded={showEntryFilters}
             >
-              <option value="all">كل الحالات</option>
-              <option value="مكتمل">مكتمل</option>
-              <option value="غير مكتمل">غير مكتمل</option>
-            </select>
-            <select
-              value={filters.driver}
-              onChange={(e) => setFilters((f) => ({ ...f, driver: e.target.value }))}
-              className="tracking-filter-select entry-touch-input"
-              aria-label="تصفية السائق"
-            >
-              <option value="all">كل السائقين</option>
-              {driverOptions.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
+              <span aria-hidden>{showEntryFilters ? '▾' : '▸'}</span>
+              <span>بحث وتصفية</span>
+              {hasActiveFilters && (
+                <span className="tracking-filters-disclosure__badge">مفعّل</span>
+              )}
+            </button>
             {hasActiveFilters && (
               <button type="button" onClick={clearFilters} className="tracking-filter-clear">
                 مسح
               </button>
             )}
           </div>
-        </div>
-
-        <div className="tracking-display-toolbar">
-          <div className="tracking-display-toolbar__group">
-            <span className="tracking-display-toolbar__label">الترتيب</span>
-            <div className="tracking-segmented" role="group" aria-label="ترتيب الشهور">
-              <button
-                type="button"
-                className={`tracking-segmented__btn ${
-                  sortOrder === 'desc' ? 'tracking-segmented__btn--active' : ''
-                }`}
-                onClick={() => setSortOrderPersisted('desc')}
-                aria-pressed={sortOrder === 'desc'}
-              >
-                الأحدث ← الأقدم
-              </button>
-              <button
-                type="button"
-                className={`tracking-segmented__btn ${
-                  sortOrder === 'asc' ? 'tracking-segmented__btn--active' : ''
-                }`}
-                onClick={() => setSortOrderPersisted('asc')}
-                aria-pressed={sortOrder === 'asc'}
-              >
-                الأقدم ← الأحدث
-              </button>
+          {showEntryFilters && (
+            <div className="tracking-filters-row">
+              <label className="tracking-filters-search block">
+                <span className="sr-only">بحث</span>
+                <input
+                  type="search"
+                  value={filters.query}
+                  onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))}
+                  placeholder="بحث: شهر، سائق، مبلغ..."
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-200 focus:border-blue-400 entry-touch-input"
+                />
+              </label>
+              <div className="tracking-filters-selects">
+                <select
+                  value={filters.status}
+                  onChange={(e) =>
+                    setFilters((f) => ({
+                      ...f,
+                      status: e.target.value as EntryFilters['status'],
+                    }))
+                  }
+                  className="tracking-filter-select entry-touch-input"
+                  aria-label="تصفية الحالة"
+                >
+                  <option value="all">كل الحالات</option>
+                  <option value="مكتمل">مكتمل</option>
+                  <option value="مدفوع جزئياً">مدفوع جزئياً</option>
+                  <option value="غير مكتمل">غير مكتمل</option>
+                </select>
+                <select
+                  value={filters.driver}
+                  onChange={(e) => setFilters((f) => ({ ...f, driver: e.target.value }))}
+                  className="tracking-filter-select entry-touch-input"
+                  aria-label="تصفية السائق"
+                >
+                  <option value="all">كل السائقين</option>
+                  {driverOptions.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-          </div>
-          <div className="tracking-display-toolbar__group">
-            <span className="tracking-display-toolbar__label">العرض</span>
-            <div className="tracking-segmented" role="group" aria-label="طريقة العرض">
-              <button
-                type="button"
-                className={`tracking-segmented__btn ${
-                  viewMode === 'cards' ? 'tracking-segmented__btn--active' : ''
-                }`}
-                onClick={() => setViewModePersisted('cards')}
-                aria-pressed={viewMode === 'cards'}
-              >
-                بطاقات
-              </button>
-              <button
-                type="button"
-                className={`tracking-segmented__btn tracking-segmented__btn--table-only ${
-                  viewMode === 'table' ? 'tracking-segmented__btn--active' : ''
-                }`}
-                onClick={() => setViewModePersisted('table')}
-                aria-pressed={viewMode === 'table'}
-              >
-                جدول
-              </button>
-            </div>
-          </div>
+          )}
         </div>
 
         <p className="text-xs text-slate-500">
@@ -3313,18 +3553,6 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
             </>
           )}
         </p>
-
-        {sortedEntries.length > pageSize && (
-          <PaginationBar
-            page={pagination.page}
-            totalPages={pagination.totalPages}
-            rangeStart={pagination.rangeStart}
-            rangeEnd={pagination.rangeEnd}
-            total={pagination.total}
-            pageSize={pageSize}
-            onPageChange={setPage}
-          />
-        )}
 
         {entries.length === 0 ? (
           <p className="py-12 text-center text-slate-400 text-sm">
@@ -3361,17 +3589,74 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
           />
         )}
 
-        {sortedEntries.length > pageSize && (
-          <PaginationBar
-            page={pagination.page}
-            totalPages={pagination.totalPages}
-            rangeStart={pagination.rangeStart}
-            rangeEnd={pagination.rangeEnd}
-            total={pagination.total}
-            pageSize={pageSize}
-            onPageChange={setPage}
-          />
-        )}
+        <div className="tracking-list-footer">
+          <div className="tracking-display-toolbar tracking-display-toolbar--footer">
+            <div className="tracking-display-toolbar__group tracking-display-toolbar__group--compact">
+              <span className="tracking-display-toolbar__label">الترتيب</span>
+              <button
+                type="button"
+                className="tracking-sort-toggle"
+                onClick={() =>
+                  setSortOrderPersisted(sortOrder === 'desc' ? 'asc' : 'desc')
+                }
+                aria-label={
+                  sortOrder === 'desc'
+                    ? 'الترتيب: الأحدث أولاً. انقر لعرض الأقدم أولاً'
+                    : 'الترتيب: الأقدم أولاً. انقر لعرض الأحدث أولاً'
+                }
+                title="تبديل الترتيب"
+              >
+                <span className="tracking-sort-toggle__icon" aria-hidden>
+                  {sortOrder === 'desc' ? '↓' : '↑'}
+                </span>
+                <span className="tracking-sort-toggle__text">
+                  {sortOrder === 'desc' ? 'الأحدث ← الأقدم' : 'الأقدم ← الأحدث'}
+                </span>
+              </button>
+            </div>
+            <div className="tracking-display-toolbar__group tracking-display-toolbar__group--compact tracking-display-toolbar__group--view">
+              <span className="tracking-display-toolbar__label">العرض</span>
+              <div
+                className="tracking-segmented tracking-segmented--compact"
+                role="group"
+                aria-label="طريقة العرض"
+              >
+                <button
+                  type="button"
+                  className={`tracking-segmented__btn ${
+                    viewMode === 'cards' ? 'tracking-segmented__btn--active' : ''
+                  }`}
+                  onClick={() => setViewModePersisted('cards')}
+                  aria-pressed={viewMode === 'cards'}
+                >
+                  بطاقات
+                </button>
+                <button
+                  type="button"
+                  className={`tracking-segmented__btn tracking-segmented__btn--table-only ${
+                    viewMode === 'table' ? 'tracking-segmented__btn--active' : ''
+                  }`}
+                  onClick={() => setViewModePersisted('table')}
+                  aria-pressed={viewMode === 'table'}
+                >
+                  جدول
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {sortedEntries.length > pageSize && (
+            <PaginationBar
+              page={pagination.page}
+              totalPages={pagination.totalPages}
+              rangeStart={pagination.rangeStart}
+              rangeEnd={pagination.rangeEnd}
+              total={pagination.total}
+              pageSize={pageSize}
+              onPageChange={setPage}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -4340,18 +4625,6 @@ const LicensesTab: React.FC<{
   );
 };
 
-const AccessibilityIcon: React.FC<{ className?: string }> = ({ className = 'w-7 h-7' }) => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    className={className}
-    aria-hidden
-  >
-    <circle cx="12" cy="4" r="2" />
-    <path d="M12 7c-2.2 0-4 1.8-4 4v1H5l4.5 9.5 2.5-5 2.5 5L19 12h-3V11c0-2.2-1.8-4-4-4z" />
-  </svg>
-);
-
 const DisplayAccessibilityPanel: React.FC<{
   open: boolean;
   onClose: () => void;
@@ -4368,7 +4641,6 @@ const DisplayAccessibilityPanel: React.FC<{
     const onClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
       if (panelRef.current?.contains(target)) return;
-      if ((target as Element).closest?.('.display-access-fab-btn')) return;
       onClose();
     };
     document.addEventListener('keydown', onKey);
@@ -4435,6 +4707,9 @@ const SettingsTab: React.FC<{
   assignedUserDisplayName?: string | null;
   onVehicleReassigned: () => void;
   onDeletionReviewed: (req: DeletionRequestRecord) => void;
+  paymentSetupPrompt?: PaymentSetupPromptReason | null;
+  paymentSetupBlocking?: boolean;
+  onDriverNameCommit: (name: string) => void;
 }> = ({
   settings,
   entryCount,
@@ -4458,7 +4733,27 @@ const SettingsTab: React.FC<{
   assignedUserDisplayName,
   onVehicleReassigned,
   onDeletionReviewed,
-}) => (
+  paymentSetupPrompt = null,
+  paymentSetupBlocking = false,
+  onDriverNameCommit,
+}) => {
+  const firstPaymentDateRef = useRef<HTMLInputElement>(null);
+  const [driverDraft, setDriverDraft] = useState(settings.currentDriverName ?? '');
+
+  useEffect(() => {
+    setDriverDraft(settings.currentDriverName ?? '');
+  }, [settings.currentDriverName]);
+
+  useEffect(() => {
+    if (!paymentSetupPrompt) return;
+    const timer = window.setTimeout(() => {
+      firstPaymentDateRef.current?.focus();
+      firstPaymentDateRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [paymentSetupPrompt]);
+
+  return (
   <div className="max-w-3xl space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
@@ -4536,17 +4831,109 @@ const SettingsTab: React.FC<{
             }
             className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 app-surface"
           />
-          <p className="text-xs app-text-muted mt-1">الافتراضي: 750 — لكل الأشهر الجديدة</p>
+          <p className="text-xs app-text-muted mt-1">
+            الإيجار الشهري للسائق — يُستخدم في دورة الدفع كل ١٠ أيام (الافتراضي 750)
+          </p>
         </label>
         <label className="block">
           <span className="text-sm font-medium text-slate-600">اسم السائق الحالي</span>
           <input
             type="text"
-            value={settings.currentDriverName}
-            onChange={(e) => onChange({ ...settings, currentDriverName: e.target.value })}
+            value={driverDraft}
+            onChange={(e) => setDriverDraft(e.target.value)}
+            onBlur={() => {
+              const next = driverDraft.trim();
+              const prev = (settings.currentDriverName ?? '').trim();
+              if (next !== prev) onDriverNameCommit(next);
+              else setDriverDraft(settings.currentDriverName ?? '');
+            }}
             placeholder="يُعبَّأ تلقائياً عند دفع ضمان"
             className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 app-surface"
           />
+          <p className="text-xs app-text-muted mt-1">
+            عند تغيير الاسم والخروج من الحقل يُطلب تأكيد وتاريخ أول دفعة جديد.
+          </p>
+        </label>
+        <label
+          id="driver-first-payment-date-setup"
+          className={`block sm:col-span-2 rounded-xl transition-shadow ${
+            paymentSetupPrompt ? 'ring-2 ring-amber-400 ring-offset-2 p-3 bg-amber-50/50' : ''
+          }`}
+        >
+          {paymentSetupPrompt && (
+            <p
+              className="text-sm font-semibold text-amber-900 bg-amber-100 border border-amber-200 rounded-lg px-3 py-2 mb-3"
+              role="status"
+            >
+              {paymentSetupPrompt === 'new_driver'
+                ? 'تغيّر السائق — أدخل تاريخ أول دفعة للسائق الجديد (مطلوب قبل إضافة دفعات الضمان)'
+                : 'أول مرة لإضافة دفع ضمان — حدّد تاريخ أول دفعة لهذه السيارة'}
+            </p>
+          )}
+          <span className="text-sm font-medium text-slate-600">
+            تاريخ أول دفعة <span className="text-red-600">*</span>
+          </span>
+          <input
+            ref={firstPaymentDateRef}
+            type="date"
+            required
+            value={settings.driverFirstPaymentDate ?? ''}
+            onChange={(e) =>
+              onChange({
+                ...settings,
+                driverFirstPaymentDate: e.target.value.trim() || undefined,
+              })
+            }
+            className={`mt-1 w-full border rounded-lg px-3 py-2 app-surface tabular-nums ${
+              paymentSetupPrompt
+                ? 'border-amber-400 bg-white'
+                : 'border-slate-200'
+            }`}
+          />
+          <p className="text-xs app-text-muted mt-1">
+            مرساة دورة الاستحقاق كل ١٠ أيام — ٣ دفعات في الشهر (شهر محاسبي ٣٠ يوماً)
+          </p>
+          {formatNextDueHint(settings.driverFirstPaymentDate ?? '') && (
+            <p className="text-xs text-blue-800 bg-blue-50 border border-blue-100 rounded-md px-2 py-1.5 mt-2 tabular-nums">
+              {formatNextDueHint(settings.driverFirstPaymentDate ?? '')}
+            </p>
+          )}
+          {settings.driverFirstPaymentDate && (
+            <p className="text-xs text-slate-600 mt-2 tabular-nums leading-relaxed">
+              معاينة:{' '}
+              {generateDueDates(settings.driverFirstPaymentDate, { maxCount: 6 })
+                .map(formatIsoDateDisplay)
+                .join(' · ')}
+            </p>
+          )}
+          <p className="text-xs text-amber-800 mt-2">
+            تغيير التاريخ أو السائق يبدأ دورة جديدة — السجلات المحفوظة (حتى شهرك الحالي)
+            تبقى على التواريخ القديمة حتى تعيد حفظها يدوياً.
+          </p>
+          {paymentSetupBlocking && (
+            <p className="text-xs font-semibold text-red-700 mt-2" role="alert">
+              مطلوب: أدخل تاريخ أول دفعة قبل مغادرة الإعدادات أو إضافة دفع ضمان.
+            </p>
+          )}
+        </label>
+        <label className="block sm:col-span-2">
+          <span className="text-sm font-medium text-slate-600">نمط دفع السائق</span>
+          <select
+            value={settings.driverPaymentMode ?? 'advance'}
+            onChange={(e) =>
+              onChange({
+                ...settings,
+                driverPaymentMode: e.target.value as 'advance' | 'deferred',
+              })
+            }
+            className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 app-surface"
+          >
+            <option value="advance">{PAYMENT_MODE_LABELS.advance.ar}</option>
+            <option value="deferred">{PAYMENT_MODE_LABELS.deferred.ar}</option>
+          </select>
+          <p className="text-xs app-text-muted mt-1">
+            مقدّم: يدفع مقابل الفترة القادمة — مؤجّل: يدفع مقابل الفترة السابقة
+          </p>
         </label>
         <label className="block sm:col-span-2">
           <span className="text-sm font-medium text-slate-600">مالك السيارة</span>
@@ -4760,7 +5147,8 @@ const SettingsTab: React.FC<{
       )}
     </SettingsSection>
   </div>
-);
+  );
+};
 
 /* ——— ROI / Break-even ——— */
 

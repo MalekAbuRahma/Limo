@@ -3,7 +3,8 @@ import { loginViaApi } from '../utils/authApi';
 import { checkApiHealth } from '../utils/taxiApi';
 import { saveSession, sessionFromApiUser, type UserSession } from '../utils/taxiAuth';
 
-export type UiLanguage = 'ar' | 'en';
+export type { UiLanguage } from '../types/uiLanguage';
+import type { UiLanguage } from '../types/uiLanguage';
 
 const copy = {
   ar: {

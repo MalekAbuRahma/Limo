@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { AssignableUser, VehicleCreateInput, VehicleListItem } from '../taxiTypes';
 import { DEFAULT_SETTINGS } from '../taxiTypes';
 import { fetchAssignableUsers } from '../utils/authApi';
@@ -17,6 +17,24 @@ import DeleteCarConfirmModal from './DeleteCarConfirmModal';
 
 const fmt = formatNumber;
 const fmtInt = formatInteger;
+
+type AssigneeFilter = 'all' | string;
+
+function collectAssigneeOptions(vehicles: VehicleListItem[]): { id: string; label: string }[] {
+  const map = new Map<string, { id: string; label: string }>();
+  for (const v of vehicles) {
+    const id = (v.assignedUserId ?? '').trim();
+    if (!id) continue;
+    const label =
+      v.assignedUserDisplayName?.trim() ||
+      v.assignedUsername?.trim() ||
+      id;
+    map.set(id, { id, label });
+  }
+  return [...map.values()].sort((a, b) =>
+    a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })
+  );
+}
 
 interface VehicleGarageProps {
   session: UserSession;
@@ -54,8 +72,23 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
   const [assignedUserId, setAssignedUserId] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>('all');
 
   const adminCreates = canDeleteImmediately(session);
+  const assigneeOptions = useMemo(() => collectAssigneeOptions(vehicles), [vehicles]);
+  const showAssigneeFilter = assigneeOptions.length > 1;
+
+  useEffect(() => {
+    if (assigneeFilter === 'all') return;
+    if (!assigneeOptions.some((o) => o.id === assigneeFilter)) {
+      setAssigneeFilter('all');
+    }
+  }, [assigneeFilter, assigneeOptions]);
+
+  const filteredVehicles = useMemo(() => {
+    if (!showAssigneeFilter || assigneeFilter === 'all') return vehicles;
+    return vehicles.filter((v) => (v.assignedUserId ?? '') === assigneeFilter);
+  }, [vehicles, assigneeFilter, showAssigneeFilter]);
 
   useEffect(() => {
     if (!showAdd) return;
@@ -232,6 +265,53 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
             {lang === 'ar' ? 'إضافة سيارة' : 'Add vehicle'}
           </button>
         </div>
+        {showAssigneeFilter && (
+          <div
+            className="vehicle-garage-filters"
+            role="search"
+            aria-label={lang === 'ar' ? 'تصفية السيارات حسب المستخدم' : 'Filter vehicles by user'}
+          >
+            <div className="vehicle-garage-filters__row">
+              <span className="vehicle-garage-filters__label">
+                {lang === 'ar' ? 'تصفية حسب الوسم:' : 'Filter by tag:'}
+              </span>
+              <div className="vehicle-garage-filters__chips" role="group">
+                <button
+                  type="button"
+                  className={`vehicle-garage-filter-chip${assigneeFilter === 'all' ? ' vehicle-garage-filter-chip--active' : ''}`}
+                  aria-pressed={assigneeFilter === 'all'}
+                  onClick={() => setAssigneeFilter('all')}
+                >
+                  {lang === 'ar' ? 'الكل' : 'All'}
+                  <span className="vehicle-garage-filter-chip__count tabular-nums">
+                    {vehicles.length}
+                  </span>
+                </button>
+                {assigneeOptions.map((opt) => {
+                  const count = vehicles.filter((v) => v.assignedUserId === opt.id).length;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      className={`vehicle-garage-filter-chip${assigneeFilter === opt.id ? ' vehicle-garage-filter-chip--active' : ''}`}
+                      aria-pressed={assigneeFilter === opt.id}
+                      onClick={() => setAssigneeFilter(opt.id)}
+                    >
+                      {opt.label}
+                      <span className="vehicle-garage-filter-chip__count tabular-nums">
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <p className="vehicle-garage-filters__current">
+              {lang === 'ar' ? 'المستخدم الحالي:' : 'Current user:'}{' '}
+              <span className="vehicle-garage-filters__current-tag">{session.displayName}</span>
+            </p>
+          </div>
+        )}
       </header>
 
       <AppModal
@@ -446,12 +526,29 @@ const VehicleGarage: React.FC<VehicleGarageProps> = ({
             )}
           </div>
         </div>
+      ) : filteredVehicles.length === 0 ? (
+        <div className="vehicle-garage-empty">
+          <div className="vehicle-garage-empty__content">
+            <p className="vehicle-garage-empty__message">
+              {lang === 'ar'
+                ? 'لا توجد سيارات لهذا الوسم. جرّب «الكل» أو وسماً آخر.'
+                : 'No vehicles for this tag. Try All or another tag.'}
+            </p>
+            <button
+              type="button"
+              className="vehicle-garage-filter-chip vehicle-garage-filter-chip--active"
+              onClick={() => setAssigneeFilter('all')}
+            >
+              {lang === 'ar' ? 'عرض الكل' : 'Show all'}
+            </button>
+          </div>
+        </div>
       ) : (
         <div
           className="vehicle-garage-grid"
-          data-count={vehicles.length <= 2 ? String(vehicles.length) : 'many'}
+          data-count={filteredVehicles.length <= 2 ? String(filteredVehicles.length) : 'many'}
         >
-          {vehicles.map((v) => (
+          {filteredVehicles.map((v) => (
             <article
               key={v.id}
               className="vehicle-garage-card"

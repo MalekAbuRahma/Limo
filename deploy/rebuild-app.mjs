@@ -2,9 +2,12 @@ import { Client } from 'ssh2';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { requireDeployPassword } from './load-deploy-env.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
+
+requireDeployPassword();
 const password = process.env.DEPLOY_SSH_PASSWORD;
 
 function upload(conn, local, remote) {

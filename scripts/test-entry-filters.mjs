@@ -23,9 +23,19 @@ assert(TRACKING_PAGE_SIZE > 0, 'page size configured');
 
 const incompleteOnly = filterEntries(entries, { query: '', status: 'غير مكتمل', driver: 'all' });
 assert(
-  incompleteOnly.length > 0 && incompleteOnly.every((e) => e.status === 'غير مكتمل'),
-  'status filter incomplete'
+  incompleteOnly.every((e) => e.status === 'غير مكتمل'),
+  'status filter incomplete only unpaid'
 );
+if (entries.some((e) => e.status === 'غير مكتمل')) {
+  assert(incompleteOnly.length > 0, 'has unpaid months in sample');
+}
+
+const partialOnly = filterEntries(entries, { query: '', status: 'مدفوع جزئياً', driver: 'all' });
+assert(
+  partialOnly.every((e) => e.status === 'مدفوع جزئياً'),
+  'status filter partial'
+);
+assert(partialOnly.length > 0, 'sample has partial payment months');
 
 const byDriver = filterEntries(entries, {
   query: '',

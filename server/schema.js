@@ -128,6 +128,21 @@ export async function initSchema() {
   await pool.query(`
     ALTER TABLE monthly_entries ADD COLUMN IF NOT EXISTS work_start_date TEXT NOT NULL DEFAULT '';
   `);
+  await pool.query(`
+    ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS driver_first_payment_date TEXT NOT NULL DEFAULT '';
+  `);
+  await pool.query(`
+    ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS driver_payment_mode TEXT NOT NULL DEFAULT 'advance';
+  `);
+  await pool.query(`
+    ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS payment_cycle_epoch INTEGER NOT NULL DEFAULT 0;
+  `);
+  await pool.query(`
+    ALTER TABLE monthly_entries ADD COLUMN IF NOT EXISTS payment_anchor_date TEXT NOT NULL DEFAULT '';
+  `);
+  await pool.query(`
+    ALTER TABLE monthly_entries ADD COLUMN IF NOT EXISTS payment_cycle_epoch INTEGER NOT NULL DEFAULT 0;
+  `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (

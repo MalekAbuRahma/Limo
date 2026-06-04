@@ -15,6 +15,8 @@ interface HomeSettingsTabProps {
   storageSource: StorageSource;
   vehicleCount: number;
   onDeletionReviewed: (req: DeletionRequestRecord) => void;
+  /** Inside profile menu — tighter layout */
+  embedded?: boolean;
 }
 
 const HomeSettingsTab: React.FC<HomeSettingsTabProps> = ({
@@ -23,19 +25,22 @@ const HomeSettingsTab: React.FC<HomeSettingsTabProps> = ({
   storageSource,
   vehicleCount,
   onDeletionReviewed,
+  embedded = false,
 }) => {
   return (
-    <div className="home-settings w-full space-y-4">
-      <div>
-        <h2 className="text-xl font-bold text-slate-800">
-          {lang === 'ar' ? 'إعدادات النظام' : 'System settings'}
-        </h2>
-        <p className="text-sm app-text-muted mt-1">
-          {lang === 'ar'
-            ? 'إعدادات عامة للأسطول — المستخدمون والموافقات'
-            : 'Fleet-wide settings — users and approvals'}
-        </p>
-      </div>
+    <div className={`home-settings w-full ${embedded ? 'space-y-3' : 'space-y-4'}`}>
+      {!embedded && (
+        <div>
+          <h2 className="text-xl font-bold text-slate-800">
+            {lang === 'ar' ? 'إعدادات النظام' : 'System settings'}
+          </h2>
+          <p className="text-sm app-text-muted mt-1">
+            {lang === 'ar'
+              ? 'إعدادات عامة للأسطول — المستخدمون والموافقات'
+              : 'Fleet-wide settings — users and approvals'}
+          </p>
+        </div>
+      )}
 
       <SettingsSection
         title={lang === 'ar' ? 'حسابي' : 'My account'}

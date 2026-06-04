@@ -7,21 +7,17 @@ import { Client } from 'ssh2';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { config } from 'dotenv';
+import './load-deploy-env.mjs';
+import { requireDeployPassword } from './load-deploy-env.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, '..');
-config({ path: join(projectRoot, '.env') });
-config({ path: join(projectRoot, '.env.local'), override: true });
+
+requireDeployPassword();
 
 const password = process.env.DEPLOY_SSH_PASSWORD;
 const host = process.env.DEPLOY_HOST || '147.93.122.6';
 const remoteDir = process.env.DEPLOY_DIR || '/opt/fleetflow';
-
-if (!password) {
-  console.error('Set DEPLOY_SSH_PASSWORD');
-  process.exit(1);
-}
 
 function exec(conn, cmd, timeoutMs = 300000, { quiet = false } = {}) {
   return new Promise((resolve, reject) => {

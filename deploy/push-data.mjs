@@ -7,6 +7,7 @@ import { Client } from 'ssh2';
 import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { requireDeployPassword } from './load-deploy-env.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, '..');
@@ -17,10 +18,7 @@ const user = process.env.DEPLOY_USER || 'root';
 const password = process.env.DEPLOY_SSH_PASSWORD;
 const remoteDir = process.env.DEPLOY_DIR || '/opt/fleetflow';
 
-if (!password) {
-  console.error('Set DEPLOY_SSH_PASSWORD');
-  process.exit(1);
-}
+requireDeployPassword();
 if (!existsSync(sqlitePath)) {
   console.error(`SQLite not found: ${sqlitePath}`);
   process.exit(1);

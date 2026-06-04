@@ -15,6 +15,7 @@
     "db:migrate": "npx tsx scripts/migrate-sqlite-to-pg.mjs",
     "db:push": "node deploy/push-data.mjs",
     "users:push": "node deploy/push-users.mjs",
+    "deploy": "node deploy/deploy-remote.mjs",
     "start:all": "node scripts/start-all.mjs",
     "build": "node node_modules/vite/bin/vite.js build",
     "preview": "node node_modules/vite/bin/vite.js preview --host",
@@ -39,7 +40,9 @@
   "devDependencies": {
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "playwright": "^1.60.0",
     "sql.js": "^1.14.1",
+    "ssh2": "^1.17.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }

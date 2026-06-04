@@ -1,6 +1,7 @@
 import React, { Suspense, useEffect, useState } from 'react';
 
-import TaxiLogin, { type UiLanguage } from './components/TaxiLogin';
+import TaxiLogin from './components/TaxiLogin';
+import type { UiLanguage } from './types/uiLanguage';
 import { appDir, loadingCopy } from './utils/uiCopy';
 
 
@@ -34,43 +35,26 @@ const App: React.FC = () => {
 
 
   useEffect(() => {
-
     const run = async () => {
-
-      const stored = getSession();
-
-      if (!stored) {
-
-        setAuthReady(true);
-
-        return;
-
-      }
-
-      const restored = await restoreSessionFromApi(stored);
-
-      if (restored) {
-
-        saveSession(restored);
-
-        setSession(restored);
-
-      } else if (stored.token) {
-
+      try {
+        const stored = getSession();
+        if (!stored) return;
+        const restored = await restoreSessionFromApi(stored);
+        if (restored) {
+          saveSession(restored);
+          setSession(restored);
+        } else if (stored.token) {
+          clearSession();
+        } else {
+          setSession(stored);
+        }
+      } catch {
         clearSession();
-
-      } else {
-
-        setSession(stored);
-
+      } finally {
+        setAuthReady(true);
       }
-
-      setAuthReady(true);
-
     };
-
     void run();
-
   }, []);
 
 

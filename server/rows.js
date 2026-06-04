@@ -33,6 +33,9 @@ export function rowToVehicleMeta(row) {
     assignedUserId: row.assigned_user_id || null,
     assignedUserDisplayName: row.assigned_user_display_name || null,
     assignedUsername: row.assigned_username || null,
+    driverFirstPaymentDate: row.driver_first_payment_date?.trim() || undefined,
+    driverPaymentMode: row.driver_payment_mode === 'deferred' ? 'deferred' : 'advance',
+    paymentCycleEpoch: Number(row.payment_cycle_epoch ?? 0),
   };
 }
 
@@ -62,6 +65,9 @@ export function rowToEntry(row) {
     ],
     paymentComplete: Boolean(row.payment_complete),
     workStartDate: row.work_start_date?.trim() || undefined,
+    paymentAnchorDate: row.payment_anchor_date?.trim() || undefined,
+    paymentCycleEpoch:
+      row.payment_cycle_epoch != null ? Number(row.payment_cycle_epoch) : undefined,
     monthlyGuarantee: row.monthly_guarantee != null ? Number(row.monthly_guarantee) : undefined,
   };
 }

@@ -5,6 +5,8 @@ import type { UserSession } from '../utils/taxiAuth';
 import { roleLabel } from '../utils/permissions';
 import type { UiLanguage } from './TaxiLogin';
 
+type ProfilePanel = 'main' | 'system';
+
 interface ProfileMenuProps {
   session: UserSession;
   lang: UiLanguage;
@@ -13,6 +15,8 @@ interface ProfileMenuProps {
   onSettingsChange: (s: TaxiSettings) => void;
   onOpenAccessibility: () => void;
   onLogout: () => void;
+  /** Fleet-wide settings (users, storage) — shown on 2nd profile screen */
+  systemSettingsContent?: React.ReactNode;
 }
 
 const ProfileMenu: React.FC<ProfileMenuProps> = ({
@@ -23,8 +27,10 @@ const ProfileMenu: React.FC<ProfileMenuProps> = ({
   onSettingsChange,
   onOpenAccessibility,
   onLogout,
+  systemSettingsContent,
 }) => {
   const [open, setOpen] = useState(false);
+  const [panel, setPanel] = useState<ProfilePanel>('main');
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -35,13 +41,17 @@ const ProfileMenu: React.FC<ProfileMenuProps> = ({
     const el = triggerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const menuWidth = Math.min(320, window.innerWidth - 16);
+    const menuWidth = Math.min(panel === 'system' ? 420 : 320, window.innerWidth - 16);
     const isRtl = document.getElementById('taxi-app')?.dir === 'rtl';
     const left = isRtl
       ? Math.max(8, Math.min(rect.left, window.innerWidth - menuWidth - 8))
       : Math.min(window.innerWidth - menuWidth - 8, rect.left);
     setMenuPos({ top: rect.bottom + 8, left });
-  }, []);
+  }, [panel]);
+
+  useEffect(() => {
+    if (!open) setPanel('main');
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -66,7 +76,11 @@ const ProfileMenu: React.FC<ProfileMenuProps> = ({
       window.removeEventListener('scroll', onScrollOrResize, true);
       window.removeEventListener('resize', onScrollOrResize);
     };
-  }, [open, updateMenuPos]);
+  }, [open, panel, updateMenuPos]);
+
+  useEffect(() => {
+    if (open) updateMenuPos();
+  }, [panel, open, updateMenuPos]);
 
   const setTheme = (dark: boolean) => {
     const displayTheme: DisplayThemeOption = dark ? 'dark' : 'default';
@@ -82,6 +96,8 @@ const ProfileMenu: React.FC<ProfileMenuProps> = ({
           light: 'فاتح',
           dark: 'داكن',
           access: 'تمكين الوصول',
+          systemSettings: 'إعدادات النظام',
+          back: 'رجوع',
           logout: 'تسجيل الخروج',
         }
       : {
@@ -91,22 +107,44 @@ const ProfileMenu: React.FC<ProfileMenuProps> = ({
           light: 'Light',
           dark: 'Dark',
           access: 'Display access',
+          systemSettings: 'System settings',
+          back: 'Back',
           logout: 'Sign out',
         };
+
+  const menuWidth = Math.min(panel === 'system' ? 420 : 320, window.innerWidth - 16);
 
   const dropdown = open && menuPos && (
     <div
       ref={dropdownRef}
-      className="profile-menu-dropdown profile-menu-dropdown--portal"
+      className={`profile-menu-dropdown profile-menu-dropdown--portal${
+        panel === 'system' ? ' profile-menu-dropdown--system' : ''
+      }`}
       role="menu"
       style={{
         position: 'fixed',
         top: menuPos.top,
         left: menuPos.left,
-        width: Math.min(320, window.innerWidth - 16),
+        width: menuWidth,
         zIndex: 200,
       }}
     >
+      {panel === 'system' && systemSettingsContent ? (
+        <>
+          <button
+            type="button"
+            className="profile-menu-back"
+            onClick={() => setPanel('main')}
+          >
+            <span className="profile-menu-chevron profile-menu-chevron--back" aria-hidden>
+              ›
+            </span>
+            <span>{labels.back}</span>
+          </button>
+          <div className="profile-menu-settings-scroll">{systemSettingsContent}</div>
+        </>
+      ) : (
+        <>
       <div className="profile-menu-header">
         <div className="profile-menu-header-avatar" aria-hidden>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -176,6 +214,26 @@ const ProfileMenu: React.FC<ProfileMenuProps> = ({
           </div>
         </div>
 
+        {systemSettingsContent && (
+          <button
+            type="button"
+            className="profile-menu-action"
+            role="menuitem"
+            onClick={() => setPanel('system')}
+          >
+            <span className="profile-menu-row-icon" aria-hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+              </svg>
+            </span>
+            <span className="profile-menu-action-label">{labels.systemSettings}</span>
+            <span className="profile-menu-chevron" aria-hidden>
+              ‹
+            </span>
+          </button>
+        )}
+
         <button
           type="button"
           className="profile-menu-action"
@@ -217,6 +275,8 @@ const ProfileMenu: React.FC<ProfileMenuProps> = ({
           </span>
         </button>
       </div>
+        </>
+      )}
     </div>
   );
 

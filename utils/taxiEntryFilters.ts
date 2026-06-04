@@ -7,7 +7,7 @@ export const TRACKING_PAGE_SIZE = 8;
 /** Insurance / licenses / oil tables — few rows per screen */
 export const LIST_TABLE_PAGE_SIZE = 6;
 
-export type StatusFilter = 'all' | 'مكتمل' | 'غير مكتمل';
+export type StatusFilter = 'all' | 'مكتمل' | 'مدفوع جزئياً' | 'غير مكتمل';
 
 export interface EntryFilters {
   query: string;

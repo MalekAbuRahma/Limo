@@ -6,7 +6,9 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-RUN npm run build
+RUN npm run build \
+  && grep -q '/assets/' dist/index.html \
+  && ! grep -q 'index.tsx' dist/index.html
 
 FROM node:22-alpine AS production
 WORKDIR /app

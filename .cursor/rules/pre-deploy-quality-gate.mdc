@@ -7,6 +7,8 @@ alwaysApply: true
 
 **No deploy, push, or production release until the full test journey passes.**
 
+**Also: never deploy or push to production without explicit user approval in the chat** (see `deploy-quality-gate.mdc`).
+
 ## Mandatory command
 
 From `fleetflow---car-rental-&-finance-dashboard/`:

@@ -1,6 +1,7 @@
 import type { AssignableUser } from '../taxiTypes';
 import type { UserRole, UserSession } from './taxiAuth';
-import { checkApiHealth, getAuthHeaders } from './taxiApi';
+import { DEV_TEST_TOKEN, DEV_TEST_USER } from './testAuth';
+import { checkApiHealth, fetchApiHealth, getAuthHeaders } from './taxiApi';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
 

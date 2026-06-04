@@ -76,8 +76,14 @@ export interface MonthlyEntry {
   driverPaid: number;
   /** ثلاث دفعات ضمان (كل ١٠ أيام تقويم — قد تُستخدم ١–٣ خانات) */
   driverPayments?: DriverPaymentTriple;
-  /** أول يوم عمل في هذا الشهر (تقويم) — فارغ = من أول الشهر */
+  /**
+   * @deprecated — استخدم paymentAnchorDate (لقطة عند الحفظ). يُقرأ للسجلات القديمة فقط.
+   */
   workStartDate?: string;
+  /** تاريخ أول دفعة المستخدم عند حفظ هذا السجل (للأشهر السابقة لا يتغيّر) */
+  paymentAnchorDate?: string;
+  /** نسخة دورة الدفع عند الحفظ — تُقارَن بإعدادات السيارة */
+  paymentCycleEpoch?: number;
   /** تسديد مكتمل يدوياً (حتى لو المتبقي > 0) */
   paymentComplete?: boolean;
   /** الضمان المطبّق عند الحفظ — لا يتغيّر إذا غيّرت الإعدادات لاحقاً */
@@ -126,6 +132,17 @@ export interface TaxiSettings {
   insuranceReceivedTotal: number;
   /** مالك السيارة — يظهر كوسم (Tag) */
   ownerName: string;
+  /**
+   * دورة دفع السائق: مقدّم = يدفع للفترة القادمة ١٠ أيام، مؤجّل = للفترة السابقة
+   * @default advance
+   */
+  driverPaymentMode?: 'advance' | 'deferred';
+  /** تاريخ أول دفعة — مرساة دورة الاستحقاق كل ١٠ أيام (إعداد لكل سيارة) */
+  driverFirstPaymentDate?: string;
+  /**
+   * يزيد عند تغيير تاريخ أول دفعة أو السائق — لإعادة احتساب الأشهر الحالية والمستقبلية فقط
+   */
+  paymentCycleEpoch?: number;
 }
 
 /** تكلفة ترخيص السيارة لسنة واحدة */
@@ -250,4 +267,7 @@ export const DEFAULT_SETTINGS: TaxiSettings = {
   comfortableReading: false,
   insuranceReceivedTotal: 0,
   ownerName: '',
+  driverPaymentMode: 'advance',
+  driverFirstPaymentDate: undefined,
+  paymentCycleEpoch: 0,
 };

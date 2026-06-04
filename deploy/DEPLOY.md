@@ -19,9 +19,27 @@ cd deploy
 **Node (recommended on Windows):**
 
 ```powershell
-$env:DEPLOY_SSH_PASSWORD='your-root-password'
-node deploy/deploy-remote.mjs
+# 1) Copy deploy/.env.deploy.example → deploy/.env.deploy and set DEPLOY_SSH_PASSWORD
+# 2) From project root:
+npm install
+npm run deploy
 ```
+
+Or with an env var:
+
+```powershell
+$env:DEPLOY_SSH_PASSWORD='your-root-password'
+npm run deploy
+```
+
+### Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| `Cannot find package 'ssh2'` | Run `npm install` at project root (`ssh2` is a devDependency). |
+| `Set DEPLOY_SSH_PASSWORD` | Create `deploy/.env.deploy` from `deploy/.env.deploy.example`. |
+| `tar: SCHILY.fflags` warnings | Harmless on extract; archives now use `--format gnu` on Windows. |
+| PowerShell script resets DB password | Use `npm run deploy` (Node) — `deploy-to-server.ps1` now keeps existing `.env`. |
 
 ## Manual steps on server
 
