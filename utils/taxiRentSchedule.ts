@@ -26,6 +26,10 @@ export interface RentSchedule {
   slotCount: number;
   slotTargets: number[];
   periodHint: string;
+  /** نفس periodHint بدون قائمة التواريخ */
+  shortPeriodHint: string;
+  /** التواريخ مفصولة بنقط للـ tooltip */
+  dueDatesPreview: string;
   /** تواريخ الاستحقاق في شهر السجل (ISO) */
   dueDatesInMonth: string[];
 }

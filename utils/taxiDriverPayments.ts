@@ -35,6 +35,8 @@ export function computeRentSchedule(
     slotCount: cycle.slotCount,
     slotTargets: [...cycle.slotTargets],
     periodHint: cycle.periodHint,
+    shortPeriodHint: cycle.shortPeriodHint,
+    dueDatesPreview: cycle.dueDatesPreview,
     dueDatesInMonth: cycle.dueDatesInMonth,
   };
 }

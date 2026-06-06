@@ -150,12 +150,9 @@ import {
   type DriverPaymentTriple,
 } from '../utils/taxiDriverPayments';
 import { paymentSlotLabelForCycle } from '../utils/taxiRentSchedule';
-import {
-  formatNextDueHint,
-  PAYMENT_MODE_LABELS,
-  generateDueDates,
-} from '../utils/taxiPaymentCycle';
+import { PAYMENT_MODE_LABELS } from '../utils/taxiPaymentCycle';
 import { formatIsoDateDisplay } from '../utils/taxiCalendarIso';
+import { PaymentCyclePreview } from './PaymentCyclePreview';
 import {
   applyPaymentCycleSettingsPatch,
   resolvePaymentAnchor,
@@ -2854,12 +2851,6 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
     previewRemaining,
     Boolean(form.paymentComplete)
   );
-  const cyclePreviewDates = useMemo(() => {
-    const first = vehiclePaymentSettings.driverFirstPaymentDate?.trim();
-    if (!first) return [];
-    return generateDueDates(first, { maxCount: 6 }).map(formatIsoDateDisplay);
-  }, [vehiclePaymentSettings.driverFirstPaymentDate]);
-
   const anchorForFormState = (f: Omit<MonthlyEntry, 'id'>) =>
     resolvePaymentAnchor(
       {
@@ -3201,33 +3192,12 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                 {form.month || formatMonthLabel(form.date)}
               </p>
             </label>
-            <div className="block sm:col-span-2 lg:col-span-1 rounded-lg border border-blue-100 bg-blue-50/80 px-3 py-2.5">
-              <p className="text-xs font-medium text-blue-900">دورة الدفع (إعدادات السيارة)</p>
-              <p className="text-[11px] text-blue-800 mt-1 tabular-nums">
-                تاريخ أول دفعة:{' '}
-                {vehiclePaymentSettings.driverFirstPaymentDate
-                  ? formatIsoDateDisplay(vehiclePaymentSettings.driverFirstPaymentDate)
-                  : '— غير محدد —'}
-              </p>
-              <p className="text-[11px] text-blue-800 mt-0.5 tabular-nums">
-                مرساة هذا السجل: {formatIsoDateDisplay(paymentAnchor)}
-              </p>
-              {editingPriorCycle && (
-                <p className="text-[11px] text-amber-900 mt-1 font-medium">
-                  دورة دفع قديمة — يُحدَّث الاحتساب عند إعادة حفظ السجل بعد ضبط الإعدادات.
-                </p>
-              )}
-              {cyclePreviewDates.length > 0 && (
-                <p className="text-[11px] text-slate-600 mt-1.5 leading-relaxed tabular-nums">
-                  التسلسل (+١٠ أيام): {cyclePreviewDates.join(' · ')}
-                </p>
-              )}
-              {!vehiclePaymentSettings.driverFirstPaymentDate && (
-                <p className="text-[11px] text-amber-800 mt-1.5">
-                  عيّن تاريخ أول دفعة من تبويب الإعدادات لهذه السيارة.
-                </p>
-              )}
-            </div>
+            <PaymentCyclePreview
+              className="block sm:col-span-2 lg:col-span-1"
+              firstPaymentDate={vehiclePaymentSettings.driverFirstPaymentDate}
+              recordAnchor={paymentAnchor}
+              editingPriorCycle={editingPriorCycle}
+            />
             <label className="block sm:col-span-2 lg:col-span-1">
               <span className="text-xs font-medium text-slate-500">اسم السائق</span>
               <input
@@ -3242,8 +3212,19 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
 
           <div className="entry-payments-card entry-form-section entry-form-section--payments">
             <div className="entry-payments-card__head">
-              <h3 className="text-sm font-semibold text-blue-900">
+              <h3
+                className="text-sm font-semibold text-blue-900 flex items-center gap-1 cursor-default"
+                title={rentSchedule.dueDatesPreview !== '—' ? rentSchedule.dueDatesPreview : undefined}
+              >
                 دفعات السائق — {activeSlotCount} دفعة ضمان
+                {rentSchedule.dueDatesPreview !== '—' && (
+                  <span
+                    className="inline-flex items-center justify-center h-4 w-4 rounded-full bg-blue-100 text-blue-600 text-[10px] font-bold leading-none select-none"
+                    aria-label={`مواعيد الاستحقاق: ${rentSchedule.dueDatesPreview}`}
+                  >
+                    ⓘ
+                  </span>
+                )}
               </h3>
               <span className="text-xs sm:text-sm font-bold text-blue-800 tabular-nums">
                 المدفوع {fmt(formPaidTotal)} / {fmt(previewTotalDue)} د.أ
@@ -3267,7 +3248,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                 </div>
                 <div className="flex-1 min-w-0">
                   <p id="revenue-split-hint" className="text-xs text-slate-500 mb-2 text-right">
-                    إيراد الشهر (صفقة كاملة): {fmt(form.revenue || 0)} د.أ — {rentSchedule.periodHint}
+                    إيراد الشهر (صفقة كاملة): {fmt(form.revenue || 0)} د.أ — {rentSchedule.shortPeriodHint}
                   </p>
                   {previewTotalDue < (form.revenue || 0) && (
                     <p className="text-xs text-amber-800 mb-2 text-right tabular-nums">
@@ -4891,21 +4872,13 @@ const SettingsTab: React.FC<{
             }`}
           />
           <p className="text-xs app-text-muted mt-1">
-            مرساة دورة الاستحقاق كل ١٠ أيام — ٣ دفعات في الشهر (شهر محاسبي ٣٠ يوماً)
+            يحدد أول يوم ضمان؛ النظام يحسب باقي المواعيد تلقائياً (٣ دفعات بالشهر إذا اليوم ≤٢٢، أو
+            ١٠ أيام تشغيل متصلة إذا اليوم أكبر من ٢٢).
           </p>
-          {formatNextDueHint(settings.driverFirstPaymentDate ?? '') && (
-            <p className="text-xs text-blue-800 bg-blue-50 border border-blue-100 rounded-md px-2 py-1.5 mt-2 tabular-nums">
-              {formatNextDueHint(settings.driverFirstPaymentDate ?? '')}
-            </p>
-          )}
-          {settings.driverFirstPaymentDate && (
-            <p className="text-xs text-slate-600 mt-2 tabular-nums leading-relaxed">
-              معاينة:{' '}
-              {generateDueDates(settings.driverFirstPaymentDate, { maxCount: 6 })
-                .map(formatIsoDateDisplay)
-                .join(' · ')}
-            </p>
-          )}
+          <PaymentCyclePreview
+            className="mt-3"
+            firstPaymentDate={settings.driverFirstPaymentDate}
+          />
           <p className="text-xs text-amber-800 mt-2">
             تغيير التاريخ أو السائق يبدأ دورة جديدة — السجلات المحفوظة (حتى شهرك الحالي)
             تبقى على التواريخ القديمة حتى تعيد حفظها يدوياً.

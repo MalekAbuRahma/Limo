@@ -1,6 +1,7 @@
 /**
- * دورة دفع السائق — ٣ استحقاقات كل ١٠ أيام في كل شهر تقويمي
- * (يوم أول دفعة، +١٠، +٢٠) دون انزياح عند الأشهر ذات ٣١ يوماً.
+ * دورة دفع السائق — ٣ دفعات كل ١٠ أيام:
+ * - يوم المرساة ≤ ٢٢: ٨/١٨/٢٨ في كل شهر تقويمي.
+ * - يوم المرساة > ٢٢: فترات متصلة ١٠ أيام تشغيل ثم الاستحقاق التالي في الشهر القادم.
  */
 import * as cal from './taxiCalendarIso';
 
@@ -10,6 +11,20 @@ export const MAX_PAYMENT_SLOTS = cal.MAX_PAYMENT_SLOTS;
 /** شهر محاسبي ثابت ٣٠ يوماً — ٣ دفعات كل ١٠ أيام */
 export const ACCOUNTING_MONTH_DAYS = 30;
 export const PAYMENTS_PER_ACCOUNTING_MONTH = 3;
+
+/** فوق هذا اليوم من الشهر: دورة متصلة (١٠ أيام تشغيل ثم بداية الضمان التالي) */
+export const LATE_ANCHOR_DAY_THRESHOLD = 22;
+
+export function usesRollingPaymentCycle(firstPaymentDate: string): boolean {
+  const first = firstPaymentDate?.trim();
+  if (!first || !cal.parseYearMonth(first)) return false;
+  return cal.dayOfMonth(first) > LATE_ANCHOR_DAY_THRESHOLD;
+}
+
+/** بداية الضمان التالي بعد ١٠ أيام تشغيل (شامل) من تاريخ بداية الفترة */
+export function nextPeriodStartAfterTenDays(periodStartIso: string): string {
+  return cal.addCalendarDaysIso(periodStartIso, PAYMENT_INTERVAL_DAYS + 1);
+}
 
 export type PaymentMode = 'advance' | 'deferred';
 
@@ -47,6 +62,10 @@ export interface PaymentCycleResult {
   aggregateStatus: CyclePaymentStatus;
   aggregateStatusAr: CyclePaymentStatusAr;
   periodHint: string;
+  /** نفس periodHint لكن بدون قائمة التواريخ — للعرض المختصر */
+  shortPeriodHint: string;
+  /** قائمة التواريخ فقط مفصولة بنقط — للـ tooltip */
+  dueDatesPreview: string;
 }
 
 export const PAYMENT_MODE_LABELS: Record<PaymentMode, { ar: string; en: string }> = {
@@ -90,7 +109,35 @@ function dueDatesForCalendarMonth(
   return out;
 }
 
-/** توليد تواريخ الاستحقاق — نفس أيام الشهر (مرساة، +١٠، +٢٠) في كل شهر */
+/** دورة متصلة: كل فترة ١٠ أيام تشغيل ثم يبدأ الضمان التالي (مثلاً ٢٦/٥ → ٦/٦) */
+function generateDueDatesRolling(
+  firstPaymentDate: string,
+  options?: { from?: string; to?: string; maxCount?: number }
+): string[] {
+  const first = firstPaymentDate.trim();
+  const from = options?.from?.trim();
+  const to = options?.to?.trim();
+  const maxCount = options?.maxCount ?? 500;
+
+  const out: string[] = [];
+  let current = first;
+
+  for (let i = 0; i < maxCount * 2 && out.length < maxCount; i++) {
+    if (!from || compareIsoDate(current, from) >= 0) {
+      if (!to || compareIsoDate(current, to) <= 0) {
+        out.push(current);
+        if (out.length >= maxCount) return out;
+      }
+    }
+    const next = nextPeriodStartAfterTenDays(current);
+    if (next === current) break;
+    current = next;
+  }
+
+  return out;
+}
+
+/** توليد تواريخ الاستحقاق — نمط شهري أو متصل حسب يوم المرساة */
 export function generateDueDates(
   firstPaymentDate: string,
   options?: { from?: string; to?: string; maxCount?: number }
@@ -98,6 +145,10 @@ export function generateDueDates(
   const first = firstPaymentDate?.trim();
   const startYm = first ? cal.parseYearMonth(first) : null;
   if (!first || !startYm) return [];
+
+  if (usesRollingPaymentCycle(first)) {
+    return generateDueDatesRolling(first, options);
+  }
 
   const anchorDay = cal.dayOfMonth(first);
   const from = options?.from?.trim();
@@ -326,10 +377,16 @@ export function buildPaymentCycle(input: {
     dueDates.length > 0
       ? dueDates.map(cal.formatIsoDateDisplay).join(' · ')
       : '—';
-  const periodHint =
-    dueDates.length === 0
-      ? 'حدّد تاريخ أول دفعة في إعدادات السيارة'
-      : `${modeLabel} — ${dueDates.length} استحقاق (شهر ٣٠ يوم): ${duePreview}`;
+  const rolling = usesRollingPaymentCycle(firstPaymentDate);
+  const noDateMsg = !input.firstPaymentDate?.trim()
+    ? 'حدّد تاريخ أول دفعة في إعدادات السيارة'
+    : 'لا استحقاقات في شهر هذا السجل — راجع شهر السجل أو تاريخ أول دفعة';
+  const shortBase = rolling
+    ? `${modeLabel} — ${dueDates.length} استحقاق (١٠ أيام تشغيل متصلة)`
+    : `${modeLabel} — ${dueDates.length} استحقاق (شهر ٣٠ يوم)`;
+  const periodHint = dueDates.length === 0 ? noDateMsg : `${shortBase}: ${duePreview}`;
+  const shortPeriodHint = dueDates.length === 0 ? noDateMsg : shortBase;
+  const dueDatesPreview = duePreview;
 
   return {
     firstPaymentDate,
@@ -345,6 +402,8 @@ export function buildPaymentCycle(input: {
     aggregateStatus,
     aggregateStatusAr,
     periodHint,
+    shortPeriodHint,
+    dueDatesPreview,
   };
 }
 
@@ -357,5 +416,8 @@ export function nextDueDateFrom(firstPaymentDate: string, steps = 1): string | n
 export function formatNextDueHint(firstPaymentDate: string): string | null {
   const next = nextDueDateFrom(firstPaymentDate, 1);
   if (!next) return null;
+  if (usesRollingPaymentCycle(firstPaymentDate)) {
+    return `موعد الاستحقاق التالي (بعد ${cal.PAYMENT_INTERVAL_DAYS} أيام تشغيل): ${cal.formatIsoDateDisplay(next)}`;
+  }
   return `موعد الاستحقاق التالي (+${cal.PAYMENT_INTERVAL_DAYS} أيام): ${cal.formatIsoDateDisplay(next)}`;
 }

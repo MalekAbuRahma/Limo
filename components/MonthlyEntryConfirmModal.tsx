@@ -128,9 +128,19 @@ const MonthlyEntryConfirmModal: React.FC<MonthlyEntryConfirmModalProps> = ({
             label="المطلوب (دورة ١٠ أيام)"
             value={`${fmt(computed.totalDue)} د.أ`}
           />
-          {computed.paymentCycle.periodHint && (
-            <p className="text-[11px] text-slate-500 pb-2 leading-relaxed">
-              {computed.paymentCycle.periodHint}
+          {computed.paymentCycle.shortPeriodHint && (
+            <p
+              className="text-[11px] text-slate-500 pb-2 leading-relaxed cursor-default"
+              title={
+                computed.paymentCycle.dueDatesPreview !== '—'
+                  ? computed.paymentCycle.dueDatesPreview
+                  : undefined
+              }
+            >
+              {computed.paymentCycle.shortPeriodHint}
+              {computed.paymentCycle.dueDatesPreview !== '—' && (
+                <span className="mr-1 text-blue-400 text-[9px]">ⓘ</span>
+              )}
             </p>
           )}
           <SummaryRow

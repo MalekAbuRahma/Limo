@@ -137,6 +137,39 @@ assert(
   'settings preview: same anchor days in May and June'
 );
 
+const may26Rolling = generateDueDates('2026-05-26', { maxCount: 6 }).map(formatIsoDateDisplay);
+assert(
+  may26Rolling.join(',') === '26/05/2026,06/06/2026,17/06/2026,28/06/2026,09/07/2026,20/07/2026',
+  'late anchor: 10 operating days then next period (26/5 → 6/6)'
+);
+assert(
+  formatNextDueHint('2026-05-26') === 'موعد الاستحقاق التالي (بعد 10 أيام تشغيل): 06/06/2026',
+  'rolling next due after May 26 start'
+);
+
+const { buildPaymentCyclePreview } = await import('../utils/taxiPaymentCyclePreview.ts');
+const may24Preview = buildPaymentCyclePreview('2026-05-24', 3);
+assert(may24Preview?.kind === 'rolling', 'May 24 uses rolling preview');
+assert(
+  may24Preview?.slots[0].dueLabel === '24/05/2026' &&
+    may24Preview?.slots[1].dueLabel === '04/06/2026',
+  'rolling preview slots'
+);
+assert(
+  may24Preview?.slots[0].detailLabel.includes('10 أيام') ||
+    may24Preview?.slots[0].detailLabel.includes('١٠ أيام'),
+  'rolling slot shows operating span'
+);
+assert(
+  dueDatesInEntryMonth('2026-05-26', '2026-05-01').map(formatIsoDateDisplay).join(',') === '26/05/2026',
+  'May entry: first period only in May'
+);
+assert(
+  dueDatesInEntryMonth('2026-05-26', '2026-06-01').map(formatIsoDateDisplay).join(',') ===
+    '06/06/2026,17/06/2026,28/06/2026',
+  'June entry: three rolling periods in June'
+);
+
 const maySched = computeRentSchedule('2026-05-01', 750, 750, '2026-05-22');
 assert(maySched.slotCount === 1, 'one due date in May from May 22 anchor');
 assert(maySched.totalDue === 250, 'one accounting period = rent/3');
