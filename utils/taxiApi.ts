@@ -157,6 +157,101 @@ export async function persistVehicleStateToApi(
   }
 }
 
+// ── Driver History API ──────────────────────────────────────────────────────
+
+export interface VehicleDriver {
+  id: string;
+  vehicleId: string;
+  name: string;
+  startDate: string;
+  endDate: string | null;
+  notes: string;
+  createdAt?: string;
+}
+
+export async function fetchVehicleDrivers(vehicleId: string): Promise<VehicleDriver[]> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/vehicles/${encodeURIComponent(vehicleId)}/drivers`,
+      { headers: apiHeaders(), signal: AbortSignal.timeout(8000) }
+    );
+    if (!res.ok) return [];
+    const data = await res.json() as { drivers?: VehicleDriver[] };
+    return data.drivers ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export async function addVehicleDriverApi(
+  vehicleId: string,
+  payload: { name: string; startDate: string; notes?: string }
+): Promise<VehicleDriver | null> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/vehicles/${encodeURIComponent(vehicleId)}/drivers`,
+      {
+        method: 'POST',
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      throw new Error(body.error ?? 'فشل إضافة السائق');
+    }
+    const data = await res.json() as { driver: VehicleDriver };
+    return data.driver;
+  } catch (err) {
+    throw err;
+  }
+}
+
+export async function stopVehicleDriverApi(
+  vehicleId: string,
+  driverId: string,
+  endDate: string
+): Promise<VehicleDriver | null> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/vehicles/${encodeURIComponent(vehicleId)}/drivers/${encodeURIComponent(driverId)}/stop`,
+      {
+        method: 'PATCH',
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ endDate }),
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      throw new Error(body.error ?? 'فشل إيقاف السائق');
+    }
+    const data = await res.json() as { driver: VehicleDriver };
+    return data.driver;
+  } catch (err) {
+    throw err;
+  }
+}
+
+export async function deleteVehicleDriverApi(
+  vehicleId: string,
+  driverId: string
+): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/api/vehicles/${encodeURIComponent(vehicleId)}/drivers/${encodeURIComponent(driverId)}`,
+    {
+      method: 'DELETE',
+      headers: apiHeaders(),
+      signal: AbortSignal.timeout(8000),
+    }
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(body.error ?? 'فشل حذف السائق');
+  }
+}
+
 /** @deprecated */
 export async function fetchAppStateFromApi(): Promise<TaxiAppState | null> {
   try {

@@ -14,6 +14,10 @@ import {
   initDb,
   saveAppState,
   saveVehicleState,
+  listVehicleDrivers,
+  addVehicleDriver,
+  stopVehicleDriver,
+  deleteVehicleDriver,
 } from './db.js';
 import {
   countUsers,
@@ -545,6 +549,63 @@ async function main() {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }
+
+// ── Driver History Routes ───────────────────────────────────────────────────
+
+app.get('/api/vehicles/:vehicleId/drivers', requireAuth, async (req, res) => {
+  try {
+    await assertVehicleAccess(req.user, req.params.vehicleId);
+    const drivers = await listVehicleDrivers(req.params.vehicleId);
+    res.json({ drivers });
+  } catch (err) {
+    if (err?.code === 'VEHICLE_ACCESS_DENIED') return res.status(403).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to list drivers' });
+  }
+});
+
+app.post('/api/vehicles/:vehicleId/drivers', requireAuth, async (req, res) => {
+  try {
+    await assertVehicleAccess(req.user, req.params.vehicleId);
+    const { name, startDate, notes } = req.body ?? {};
+    if (!name?.trim()) return res.status(400).json({ error: 'اسم السائق مطلوب' });
+    if (!startDate?.trim()) return res.status(400).json({ error: 'تاريخ أول دفعة مطلوب' });
+    const driver = await addVehicleDriver(req.params.vehicleId, { name, startDate, notes });
+    res.status(201).json({ driver });
+  } catch (err) {
+    if (err?.code === 'VEHICLE_ACCESS_DENIED') return res.status(403).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to add driver' });
+  }
+});
+
+app.patch('/api/vehicles/:vehicleId/drivers/:driverId/stop', requireAuth, async (req, res) => {
+  try {
+    await assertVehicleAccess(req.user, req.params.vehicleId);
+    const { endDate } = req.body ?? {};
+    if (!endDate?.trim()) return res.status(400).json({ error: 'تاريخ الإيقاف مطلوب' });
+    const driver = await stopVehicleDriver(req.params.driverId, endDate);
+    res.json({ driver });
+  } catch (err) {
+    if (err?.code === 'VEHICLE_ACCESS_DENIED') return res.status(403).json({ error: err.message });
+    if (err?.code === 'NOT_FOUND') return res.status(404).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to stop driver' });
+  }
+});
+
+app.delete('/api/vehicles/:vehicleId/drivers/:driverId', requireAuth, async (req, res) => {
+  try {
+    await assertVehicleAccess(req.user, req.params.vehicleId);
+    await deleteVehicleDriver(req.params.driverId);
+    res.json({ ok: true });
+  } catch (err) {
+    if (err?.code === 'VEHICLE_ACCESS_DENIED') return res.status(403).json({ error: err.message });
+    if (err?.code === 'NOT_FOUND') return res.status(404).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete driver' });
+  }
+});
 
 main().catch((err) => {
   console.error('Failed to start API:', err.message || err);

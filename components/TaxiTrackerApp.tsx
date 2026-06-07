@@ -153,6 +153,7 @@ import { paymentSlotLabelForCycle } from '../utils/taxiRentSchedule';
 import { PAYMENT_MODE_LABELS } from '../utils/taxiPaymentCycle';
 import { formatIsoDateDisplay } from '../utils/taxiCalendarIso';
 import { PaymentCyclePreview } from './PaymentCyclePreview';
+import { DriverHistoryPanel } from './DriverHistoryPanel';
 import {
   applyPaymentCycleSettingsPatch,
   resolvePaymentAnchor,
@@ -3074,22 +3075,50 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
           }}
         />
       )}
-      {entries.length > 0 && lateCount > 0 && (
-        <button
-          type="button"
-          onClick={() => {
-            setFilters((f) => ({ ...f, status: 'غير مكتمل' }));
-            setPage(1);
-          }}
-          className="inline-flex items-center gap-2 px-3 py-1.5 bg-red-50 text-red-800 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-100 text-right w-full sm:w-auto justify-center sm:justify-start"
-          title="عرض الأشهر غير المكتملة"
-        >
-          <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
-          <span className="tabular-nums">
-            {fmtInt(lateCount)} شهر غير مكتمل — متبقي {fmt(totalRemaining)} د.أ
-          </span>
-        </button>
-      )}
+      {entries.length > 0 && lateCount > 0 && (() => {
+        const incompleteEntries = entries.filter((e) => e.status !== 'مكتمل');
+        return (
+          <div className="flex flex-col gap-1.5 w-full sm:w-auto" dir="rtl">
+            <div className="flex items-center gap-2 px-3 py-1 bg-red-50 border border-red-200 rounded-lg">
+              <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+              <span className="text-xs font-semibold text-red-800 tabular-nums">
+                {fmtInt(lateCount)} شهر غير مكتمل — إجمالي المتبقي: {fmt(totalRemaining)} د.أ
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setFilters((f) => ({ ...f, status: 'غير مكتملة', query: '' }));
+                  setPage(1);
+                  setShowEntryFilters(true);
+                }}
+                className="mr-auto text-[11px] text-red-600 underline hover:text-red-800"
+                title="عرض كل الأشهر غير المكتملة"
+              >
+                عرض الكل
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {incompleteEntries.map((e) => (
+                <button
+                  key={e.id}
+                  type="button"
+                  onClick={() => {
+                    setFilters((f) => ({ ...f, status: 'all', query: e.date.slice(0, 7) }));
+                    setPage(1);
+                    setShowEntryFilters(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-red-200 rounded-lg text-xs font-medium text-red-800 hover:bg-red-50 transition-colors"
+                  title={`عرض ${e.month ?? e.date} — متبقي ${fmt(e.remaining)} د.أ`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
+                  <span>{e.month ?? e.date.slice(0, 7)}</span>
+                  <span className="text-red-500 font-semibold tabular-nums">— {fmt(e.remaining)} د.أ</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
       {entries.length > 0 && lateCount === 0 && (
         <span className="inline-flex items-center gap-2 px-3 py-1.5 bg-green-50 text-green-800 border border-green-200 rounded-lg text-sm font-medium w-full sm:w-auto justify-center sm:justify-start">
           <span className="text-green-600">✓</span>
@@ -3495,8 +3524,9 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                 >
                   <option value="all">كل الحالات</option>
                   <option value="مكتمل">مكتمل</option>
+                  <option value="غير مكتملة">غير مكتمل (كل)</option>
                   <option value="مدفوع جزئياً">مدفوع جزئياً</option>
-                  <option value="غير مكتمل">غير مكتمل</option>
+                  <option value="غير مكتمل">غير مدفوع تماماً</option>
                 </select>
                 <select
                   value={filters.driver}
@@ -4735,22 +4765,21 @@ const SettingsTab: React.FC<{
   }, [paymentSetupPrompt]);
 
   return (
-  <div className="max-w-3xl space-y-4">
+  <div className="max-w-3xl space-y-5" dir="rtl">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h2 className="text-xl font-bold text-slate-800">
+        <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+          <span className="text-2xl">⚙️</span>
           {lang === 'ar' ? 'الإعدادات' : 'Settings'}
         </h2>
-        <p className="text-sm app-text-muted mt-1">
-          {lang === 'ar'
-            ? 'بيانات السيارة، التقارير، والنسخ الاحتياطي — الحوادث في تبويب «التأمين والحوادث»'
-            : 'Vehicle, reports, and backups — accidents are under Insurance tab'}
+        <p className="text-xs text-slate-400 mt-1">
+          {settings.vehicleLabel ? `إعدادات سيارة: ${settings.vehicleLabel}` : 'إعدادات السيارة'}
         </p>
       </div>
       <button
         type="button"
         onClick={onBack}
-        className="px-3 py-2 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
+        className="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
       >
         {lang === 'ar' ? '← رجوع' : '← Back'}
       </button>
@@ -4773,10 +4802,11 @@ const SettingsTab: React.FC<{
     {canReassignVehicle(session) && vehicleId && (
       <SettingsSection
         title={lang === 'ar' ? 'تعيين المستخدم' : 'User assignment'}
-        subtitle={
-          lang === 'ar' ? 'من يرى هذه السيارة في مرآبه' : 'Who sees this car in their garage'
-        }
+        subtitle={lang === 'ar' ? 'من يرى هذه السيارة في مرآبه' : 'Who sees this car in their garage'}
         icon="👤"
+        accent="rose"
+        defaultOpen={false}
+        badge={lang === 'ar' ? 'مشرف' : 'Admin'}
       >
         <VehicleAssignmentSettings
           vehicleId={vehicleId}
@@ -4788,7 +4818,7 @@ const SettingsTab: React.FC<{
       </SettingsSection>
     )}
 
-    <SettingsSection title="إعدادات العمل" subtitle="الضمان، السائق، واسم السيارة" icon="🚕">
+    <SettingsSection title="السائق والضمان" subtitle="الضمان، مواعيد الدفع، وسجل السائقين" icon="👤" accent="emerald">
       <div className="mb-4 pb-4 border-b border-slate-100">
         <p className="text-sm font-medium text-slate-600 mb-2">
           صورة السيارة <span className="text-red-600">*</span>
@@ -4889,6 +4919,18 @@ const SettingsTab: React.FC<{
             </p>
           )}
         </label>
+        {selectedVehicleId && (
+          <div className="block sm:col-span-2 border-t border-slate-200 pt-4 mt-2">
+            <DriverHistoryPanel
+              vehicleId={selectedVehicleId}
+              onDriversChanged={(active) => {
+                if (active && active.name !== settings.currentDriverName) {
+                  onChange({ ...settings, currentDriverName: active.name });
+                }
+              }}
+            />
+          </div>
+        )}
         <label className="block sm:col-span-2">
           <span className="text-sm font-medium text-slate-600">نمط دفع السائق</span>
           <select
@@ -4935,8 +4977,10 @@ const SettingsTab: React.FC<{
 
     <SettingsSection
       title="متابعة الزيت والعداد"
-      subtitle="نوع الزيت، العيار، والعداد — في تبويب مخصص"
+      subtitle="نوع الزيت، العيار، والتنبيهات"
       icon="🛢️"
+      accent="orange"
+      defaultOpen={false}
     >
       <p className="text-sm text-slate-600 leading-relaxed">
         سجلات الزيت الكاملة (النوع، العيار، العداد، التنبيهات) في تبويب منفصل لسهولة
@@ -4945,13 +4989,13 @@ const SettingsTab: React.FC<{
       <button
         type="button"
         onClick={onOpenOilTab}
-        className="mt-3 inline-flex items-center gap-2 px-4 py-2.5 bg-orange-600 text-white text-sm font-semibold rounded-xl hover:bg-orange-700"
+        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-orange-600 text-white text-sm font-semibold rounded-xl hover:bg-orange-700 transition-colors"
       >
         فتح تبويب متابعة الزيت ←
       </button>
     </SettingsSection>
 
-    <SettingsSection title="استرداد رأس المال" subtitle="تكلفة السيارة ومدة الاستخدام" icon="📊">
+    <SettingsSection title="رأس المال والاستثمار" subtitle="تكلفة السيارة ومدة الاستهلاك" icon="📊" accent="violet" defaultOpen={false}>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <label className="block">
           <span className="text-sm font-medium text-slate-600">تكلفة السيارة (د.أ)</span>
@@ -4983,27 +5027,27 @@ const SettingsTab: React.FC<{
       </div>
     </SettingsSection>
 
-    <SettingsSection title="تصدير التقارير" subtitle="Excel و PDF لكل السجلات الشهرية" icon="📄">
+    <SettingsSection title="التقارير والتصدير" subtitle="Excel و PDF لكل السجلات الشهرية" icon="📄" accent="teal" defaultOpen={false}>
       {entryCount === 0 ? (
         <p className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
           لا توجد سجلات للتصدير — أضف أشهراً من تبويب المتابعة الشهرية أولاً
         </p>
       ) : (
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <button
             type="button"
             disabled={isExporting}
             onClick={onExportExcel}
-            className="flex-1 py-2.5 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+            className="flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors"
           >
-            {isExporting ? 'جاري التصدير...' : 'تصدير Excel'}
+            📊 {isExporting ? 'جاري...' : 'Excel'}
           </button>
           <button
             type="button"
             onClick={onExportPdf}
-            className="flex-1 py-2.5 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700"
+            className="flex items-center justify-center gap-2 py-3 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-colors"
           >
-            تصدير PDF
+            📑 PDF
           </button>
         </div>
       )}
@@ -5012,34 +5056,31 @@ const SettingsTab: React.FC<{
       </p>
     </SettingsSection>
 
-    {canReviewDeletions(session) && (
+    {(canReviewDeletions(session) || canManageUsers(session)) && (
       <SettingsSection
-        title={lang === 'ar' ? 'موافقات الحذف' : 'Deletion approvals'}
-        subtitle={
-          lang === 'ar'
-            ? 'طلبات الحذف من المستخدمين'
-            : 'Deletion requests from users'
-        }
+        title={lang === 'ar' ? 'الموافقات والمستخدمون' : 'Approvals & Users'}
+        subtitle={lang === 'ar' ? 'موافقات الحذف وإدارة حسابات الفريق' : 'Deletion approvals and team accounts'}
         icon="🛡️"
+        accent="rose"
+        defaultOpen={false}
+        badge={lang === 'ar' ? 'مشرف' : 'Admin'}
       >
-        <DeletionApprovalsPanel
-          lang={lang}
-          onReviewed={onDeletionReviewed}
-        />
+        {canReviewDeletions(session) && (
+          <div className="pb-4 border-b border-slate-100">
+            <p className="text-sm font-semibold text-slate-700 mb-3">موافقات الحذف</p>
+            <DeletionApprovalsPanel lang={lang} onReviewed={onDeletionReviewed} />
+          </div>
+        )}
+        {canManageUsers(session) && (
+          <div>
+            <p className="text-sm font-semibold text-slate-700 mb-3">المستخدمون والصلاحيات</p>
+            <UsersAdminPanel session={session} lang={lang} />
+          </div>
+        )}
       </SettingsSection>
     )}
 
-    {canManageUsers(session) && (
-      <SettingsSection
-        title={lang === 'ar' ? 'المستخدمون والصلاحيات' : 'Users & permissions'}
-        subtitle={lang === 'ar' ? 'حسابات الفريق — مدير النظام' : 'Team accounts — system admin'}
-        icon="👥"
-      >
-        <UsersAdminPanel session={session} lang={lang} />
-      </SettingsSection>
-    )}
-
-    <SettingsSection title="الحفظ والنسخ الاحتياطي" subtitle="PostgreSQL والملفات الاحتياطية" icon="💾">
+    <SettingsSection title="الحفظ والنسخ الاحتياطي" subtitle="PostgreSQL، تصدير واستيراد الملفات" icon="💾" accent="slate" defaultOpen={false}>
       <p className="text-xs text-green-700 bg-green-50 border border-green-100 rounded-lg p-3">
         {storageSource === 'sql'
           ? '✓ يتم الحفظ في PostgreSQL'
@@ -5077,9 +5118,9 @@ const SettingsTab: React.FC<{
       <button
         type="button"
         onClick={onExportBackup}
-        className="w-full py-2.5 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-900"
+        className="w-full py-2.5 rounded-xl bg-slate-800 text-white text-sm font-medium hover:bg-slate-900 transition-colors"
       >
-        تصدير نسخة احتياطية (JSON)
+        ⬇ تصدير نسخة احتياطية (JSON)
       </button>
       <input
         ref={backupInputRef}
@@ -5096,7 +5137,7 @@ const SettingsTab: React.FC<{
         <button
           type="button"
           onClick={() => backupInputRef.current?.click()}
-          className="w-full py-2.5 rounded-lg border border-slate-300 text-slate-800 text-sm font-medium hover:bg-slate-50"
+          className="w-full py-2.5 rounded-xl border border-slate-300 text-slate-800 text-sm font-medium hover:bg-slate-50 transition-colors"
         >
           {lang === 'ar' ? 'استيراد نسخة احتياطية (JSON)' : 'Import backup (JSON)'}
         </button>
@@ -5112,7 +5153,7 @@ const SettingsTab: React.FC<{
           <button
             type="button"
             onClick={onClearEntries}
-            className="w-full py-2.5 rounded-lg border-2 border-red-300 text-red-700 text-sm font-semibold hover:bg-red-50"
+            className="w-full py-2.5 rounded-xl border-2 border-red-300 text-red-700 text-sm font-semibold hover:bg-red-50 transition-colors"
           >
             {lang === 'ar' ? 'حذف كل السجلات الشهرية' : 'Delete all monthly entries'}
           </button>

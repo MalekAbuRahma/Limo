@@ -397,3 +397,63 @@ export async function getFleet(actor = null) {
     vehicles: await listVehicles(actor),
   };
 }
+
+// ── Driver History ──────────────────────────────────────────────────────────
+
+export async function listVehicleDrivers(vehicleId) {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT * FROM vehicle_drivers WHERE vehicle_id = $1 ORDER BY start_date ASC`,
+    [vehicleId]
+  );
+  return rows.map(rowToVehicleDriver);
+}
+
+export async function addVehicleDriver(vehicleId, { name, startDate, notes = '' }) {
+  const pool = getPool();
+  const id = `drv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  await pool.query(
+    `INSERT INTO vehicle_drivers (id, vehicle_id, name, start_date, notes)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [id, vehicleId, String(name).trim(), String(startDate).trim(), String(notes)]
+  );
+  const { rows } = await pool.query(`SELECT * FROM vehicle_drivers WHERE id = $1`, [id]);
+  return rowToVehicleDriver(rows[0]);
+}
+
+export async function stopVehicleDriver(driverId, endDate) {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `UPDATE vehicle_drivers SET end_date = $1 WHERE id = $2 RETURNING *`,
+    [String(endDate).trim(), driverId]
+  );
+  if (!rows.length) {
+    const err = new Error('Driver not found');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+  return rowToVehicleDriver(rows[0]);
+}
+
+export async function deleteVehicleDriver(driverId) {
+  const pool = getPool();
+  const { rowCount } = await pool.query(`DELETE FROM vehicle_drivers WHERE id = $1`, [driverId]);
+  if (!rowCount) {
+    const err = new Error('Driver not found');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+}
+
+function rowToVehicleDriver(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    vehicleId: row.vehicle_id,
+    name: row.name,
+    startDate: row.start_date,
+    endDate: row.end_date ?? null,
+    notes: row.notes ?? '',
+    createdAt: row.created_at,
+  };
+}

@@ -18,7 +18,8 @@ export function computeRentSchedule(
   paidSlots?: [number, number, number],
   paymentComplete?: boolean
 ): RentSchedule {
-  const monthlyBase = monthlyRevenue > 0 ? monthlyRevenue : fallbackGuarantee;
+  // الضمان الشهري هو ما يدفعه السائق — الإيراد منفصل للتتبع فقط
+  const monthlyBase = fallbackGuarantee > 0 ? fallbackGuarantee : monthlyRevenue;
   const cycle = buildPaymentCycle({
     entryMonthDate,
     monthlyRental: monthlyBase,
@@ -173,7 +174,7 @@ export function getPaymentCycleForEntry(
   paidSlots?: DriverPaymentTriple,
   paymentComplete?: boolean
 ): PaymentCycleResult {
-  const monthly = revenue > 0 ? revenue : fallbackGuarantee;
+  const monthly = fallbackGuarantee > 0 ? fallbackGuarantee : revenue;
   return buildPaymentCycle({
     entryMonthDate,
     monthlyRental: monthly,

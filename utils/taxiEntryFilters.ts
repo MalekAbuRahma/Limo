@@ -7,7 +7,7 @@ export const TRACKING_PAGE_SIZE = 8;
 /** Insurance / licenses / oil tables — few rows per screen */
 export const LIST_TABLE_PAGE_SIZE = 6;
 
-export type StatusFilter = 'all' | 'مكتمل' | 'مدفوع جزئياً' | 'غير مكتمل';
+export type StatusFilter = 'all' | 'مكتمل' | 'مدفوع جزئياً' | 'غير مكتمل' | 'غير مكتملة';
 
 export interface EntryFilters {
   query: string;
@@ -98,7 +98,11 @@ export function filterEntries(
   const tokens = q ? q.split(/\s+/).filter(Boolean) : [];
 
   return entries.filter((e) => {
-    if (filters.status !== 'all' && e.status !== filters.status) return false;
+    if (filters.status === 'غير مكتملة') {
+      if (e.status === 'مكتمل') return false;
+    } else if (filters.status !== 'all' && e.status !== filters.status) {
+      return false;
+    }
     if (filters.driver !== 'all' && e.driverName !== filters.driver) return false;
     if (tokens.length === 0) return true;
     const hay = buildEntrySearchText(e);

@@ -10,6 +10,21 @@ import { formatNumber } from '../utils/taxiFormat';
 
 const fmt = formatNumber;
 
+// ── accent palette ───────────────────────────────────────────────────────────
+type SectionAccent = 'blue' | 'emerald' | 'amber' | 'violet' | 'rose' | 'slate' | 'orange' | 'teal';
+
+const ACCENT: Record<SectionAccent, { border: string; icon: string; badge: string; dot: string }> = {
+  blue:    { border: 'border-blue-500',   icon: 'bg-blue-50 text-blue-600',   badge: 'bg-blue-100 text-blue-700',   dot: 'bg-blue-500'   },
+  emerald: { border: 'border-emerald-500',icon: 'bg-emerald-50 text-emerald-600', badge: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  amber:   { border: 'border-amber-400',  icon: 'bg-amber-50 text-amber-600',  badge: 'bg-amber-100 text-amber-700',  dot: 'bg-amber-400'  },
+  violet:  { border: 'border-violet-500', icon: 'bg-violet-50 text-violet-600',badge: 'bg-violet-100 text-violet-700',dot: 'bg-violet-500' },
+  rose:    { border: 'border-rose-500',   icon: 'bg-rose-50 text-rose-600',    badge: 'bg-rose-100 text-rose-700',    dot: 'bg-rose-500'   },
+  slate:   { border: 'border-slate-400',  icon: 'bg-slate-100 text-slate-600', badge: 'bg-slate-100 text-slate-600',  dot: 'bg-slate-400'  },
+  orange:  { border: 'border-orange-500', icon: 'bg-orange-50 text-orange-600',badge: 'bg-orange-100 text-orange-700',dot: 'bg-orange-500' },
+  teal:    { border: 'border-teal-500',   icon: 'bg-teal-50 text-teal-600',    badge: 'bg-teal-100 text-teal-700',    dot: 'bg-teal-500'   },
+};
+
+// ── SettingsToggle ───────────────────────────────────────────────────────────
 export const SettingsToggle: React.FC<{
   label: string;
   hint?: string;
@@ -32,35 +47,105 @@ export const SettingsToggle: React.FC<{
   </div>
 );
 
+// ── SettingsSection ──────────────────────────────────────────────────────────
 export const SettingsSection: React.FC<{
   title: string;
   subtitle?: string;
   icon?: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
-}> = ({ title, subtitle, icon, children, defaultOpen = true }) => {
+  accent?: SectionAccent;
+  badge?: string;
+  required?: boolean;
+}> = ({
+  title,
+  subtitle,
+  icon,
+  children,
+  defaultOpen = true,
+  accent = 'slate',
+  badge,
+  required = false,
+}) => {
   const [open, setOpen] = useState(defaultOpen);
+  const a = ACCENT[accent];
+
   return (
-    <section className="app-surface border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+    <section
+      dir="rtl"
+      className={`app-surface rounded-2xl shadow-sm overflow-hidden border border-slate-200 border-r-4 ${a.border} transition-all`}
+    >
+      {/* Header */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between gap-3 px-5 py-4 text-right hover:bg-slate-50/80 transition-colors"
+        className="w-full flex items-center gap-3 px-4 py-3.5 text-right hover:bg-slate-50/70 transition-colors"
+        aria-expanded={open}
       >
-        <span className="text-slate-400 text-sm tabular-nums">{open ? '▾' : '◂'}</span>
-        <div className="flex-1">
-          <h3 className="font-semibold text-slate-800 flex items-center justify-end gap-2">
-            {icon && <span aria-hidden>{icon}</span>}
-            {title}
-          </h3>
-          {subtitle && <p className="text-xs app-text-muted mt-0.5">{subtitle}</p>}
+        {/* Icon pill */}
+        {icon && (
+          <span className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center text-lg ${a.icon}`}>
+            {icon}
+          </span>
+        )}
+
+        {/* Title + subtitle */}
+        <div className="flex-1 min-w-0 text-right">
+          <div className="flex items-center gap-2 justify-end flex-wrap">
+            <h3 className="font-semibold text-slate-800 text-sm leading-snug">{title}</h3>
+            {required && <span className="text-red-500 text-xs font-bold">*</span>}
+            {badge && (
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${a.badge}`}>
+                {badge}
+              </span>
+            )}
+          </div>
+          {subtitle && (
+            <p className="text-[11px] text-slate-400 mt-0.5 leading-tight">{subtitle}</p>
+          )}
         </div>
+
+        {/* Chevron */}
+        <span
+          className={`shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 text-[10px] transition-transform duration-200 ${
+            open ? 'rotate-90' : ''
+          }`}
+        >
+          ‹
+        </span>
       </button>
-      {open && <div className="px-5 pb-5 pt-1 border-t border-slate-100 space-y-4">{children}</div>}
+
+      {/* Content */}
+      {open && (
+        <div className="px-4 pb-5 pt-3 border-t border-slate-100 space-y-4">
+          {children}
+        </div>
+      )}
     </section>
   );
 };
 
+// ── FieldRow helper ──────────────────────────────────────────────────────────
+export const FieldRow: React.FC<{
+  label: string;
+  hint?: string;
+  required?: boolean;
+  children: React.ReactNode;
+  wide?: boolean;
+}> = ({ label, hint, required, children, wide }) => (
+  <div className={wide ? 'col-span-full' : ''}>
+    <label className="block">
+      <span className="text-sm font-medium text-slate-700">
+        {label}
+        {required && <span className="text-red-500 mr-1">*</span>}
+      </span>
+      <div className="mt-1">{children}</div>
+      {hint && <p className="text-[11px] text-slate-400 mt-1 leading-snug">{hint}</p>}
+    </label>
+  </div>
+);
+
+// ── DisplayPreferencesPanel ──────────────────────────────────────────────────
 export const DisplayPreferencesPanel: React.FC<{
   settings: TaxiSettings;
   onChange: (s: TaxiSettings) => void;

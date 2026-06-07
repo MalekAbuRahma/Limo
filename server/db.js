@@ -82,6 +82,26 @@ export async function closeDb() {
   await closePool();
 }
 
+export async function listVehicleDrivers(vehicleId) {
+  const f = await fleet();
+  return f.listVehicleDrivers(vehicleId);
+}
+
+export async function addVehicleDriver(vehicleId, payload) {
+  const f = await fleet();
+  return f.addVehicleDriver(vehicleId, payload);
+}
+
+export async function stopVehicleDriver(driverId, endDate) {
+  const f = await fleet();
+  return f.stopVehicleDriver(driverId, endDate);
+}
+
+export async function deleteVehicleDriver(driverId) {
+  const f = await fleet();
+  return f.deleteVehicleDriver(driverId);
+}
+
 /** Reset all tables — tests only */
 export async function resetDbForTests() {
   await initPool();
