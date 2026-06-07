@@ -2286,108 +2286,145 @@ const TrackingEntryCard: React.FC<{
           ? 'tracking-entry-card--settled'
           : '';
 
+  const paidPct =
+    row.totalDue > 0 ? Math.min(100, Math.round((row.driverPaid / row.totalDue) * 100)) : 0;
+
   return (
     <article
       className={`tracking-entry-card ${cardTone}`}
       aria-label={`سجل شهر ${row.month}`}
     >
-      {!isRowEditing && (
-        <EntryActionsMenu
-          variant="card"
-          row={row}
-          isRowEditing={isRowEditing}
-          onOpenEdit={onOpenEdit}
-          onRequestDelete={onRequestDelete}
-          onRequestPayFull={onRequestPayFull}
-        />
-      )}
-
+      {/* ── Head: month + #N on right, status + menu on left ── */}
       <header className="tracking-entry-card__head">
-        <div className="tracking-entry-card__head-top">
+        <div className="tracking-entry-card__head-meta">
           <p className="tracking-entry-card__month tabular-nums">{row.month}</p>
           <span className="tracking-entry-card__num tabular-nums">#{fmtInt(rowNum)}</span>
         </div>
-        <div className="tracking-entry-card__badges">
+        <div className="tracking-entry-card__head-actions">
           <PaymentStatusControl row={row} />
-          {row.driverName?.trim() && row.driverName.trim() !== '—' && (
-            <span className="tracking-entry-card__driver-chip" title="السائق">
-              {row.driverName}
-            </span>
+          {!isRowEditing && (
+            <EntryActionsMenu
+              variant="card"
+              row={row}
+              isRowEditing={isRowEditing}
+              onOpenEdit={onOpenEdit}
+              onRequestDelete={onRequestDelete}
+              onRequestPayFull={onRequestPayFull}
+            />
           )}
         </div>
       </header>
 
-      <div className="tracking-entry-card__body">
-        <div className="tracking-entry-card__finance">
-          <dl className="tracking-entry-card__finance-list">
-            <div className="tracking-entry-card__finance-row">
-              <dt>الإيراد</dt>
-              <dd className="text-green-700">{fmt(row.revenue)}</dd>
-            </div>
-            <div className="tracking-entry-card__finance-row">
-              <dt>المصاريف</dt>
-              <dd className="text-orange-700">{fmt(row.expenses)}</dd>
-            </div>
-            <div className="tracking-entry-card__finance-row">
-              <dt>الصافي</dt>
-              <dd className={row.net >= 0 ? 'text-blue-700' : 'text-red-600'}>{fmt(row.net)}</dd>
-            </div>
-            <div className="tracking-entry-card__finance-row">
-              <dt>المتبقي</dt>
-              <dd className={row.remaining > 0 ? 'text-red-600' : 'text-slate-400'}>
-                {fmt(row.remaining)}
-              </dd>
-            </div>
-          </dl>
-          <div className="tracking-entry-card__finance-paid">
-            <div className="tracking-entry-card__finance-paid-head">
-              <span className="tracking-entry-card__finance-paid-label">
-                المدفوع ({row.rentSchedule.slotCount} استحقاق)
-              </span>
-              <span className="tracking-entry-card__finance-paid-total tabular-nums">
-                {fmt(row.driverPaid)} / {fmt(row.totalDue)} د.أ
-              </span>
-            </div>
-            <p className="tracking-entry-card__finance-paid-breakdown tabular-nums">
-              {Array.from({ length: row.rentSchedule.slotCount }, (_, idx) => {
-                const dueLabel = paymentSlotLabelForCycle(
-                  idx,
-                  row.paymentCycle.dueDatesInMonth
-                );
-                return (
-                  <span key={`${dueLabel}-${idx}`}>
-                    {idx > 0 ? ' + ' : ''}
-                    {dueLabel} {fmt(row.driverPayments[idx])}
-                  </span>
-                );
-              })}
-            </p>
-          </div>
-          {!isRowEditing && row.remaining > 0 && (
-            <button
-              type="button"
-              className="tracking-entry-card__pay-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenEdit(row);
-              }}
-            >
-              استكمال الضمان
-            </button>
-          )}
+      {/* ── Driver name ── */}
+      {row.driverName?.trim() && row.driverName.trim() !== '—' && (
+        <div className="tracking-entry-card__driver-row">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
+          {row.driverName}
         </div>
+      )}
 
-        {(REPORT_EXPENSE_KEYS.some((k) => row.expenseDetails[k] > 0) || row.notes) && (
-          <div className="tracking-entry-card__extras">
-            <ExpenseDetailsCell row={row} />
-          </div>
-        )}
+      {/* ── Finance stats 2×2 grid ── */}
+      <div className="tracking-entry-card__stats-grid">
+        <div className="tracking-entry-card__stat-cell">
+          <span className="tracking-entry-card__stat-label">الإيراد</span>
+          <span className="tracking-entry-card__stat-value text-green-700">{fmt(row.revenue)}</span>
+        </div>
+        <div className="tracking-entry-card__stat-cell">
+          <span className="tracking-entry-card__stat-label">المصاريف</span>
+          <span className="tracking-entry-card__stat-value text-orange-700">{fmt(row.expenses)}</span>
+        </div>
+        <div className="tracking-entry-card__stat-cell">
+          <span className="tracking-entry-card__stat-label">الصافي</span>
+          <span className={`tracking-entry-card__stat-value ${row.net >= 0 ? 'text-blue-700' : 'text-red-600'}`}>
+            {fmt(row.net)}
+          </span>
+        </div>
+        <div className="tracking-entry-card__stat-cell">
+          <span className="tracking-entry-card__stat-label">المتبقي</span>
+          <span className={`tracking-entry-card__stat-value ${row.remaining > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+            {fmt(row.remaining)}
+          </span>
+        </div>
       </div>
 
+      {/* ── Payment section ── */}
+      {row.rentSchedule.slotCount > 0 && (
+        <div className="tracking-entry-card__payment">
+          <div className="tracking-entry-card__payment-header">
+            <span className="tracking-entry-card__payment-label">
+              المدفوع ({row.rentSchedule.slotCount} دفعة)
+            </span>
+            <span className="tracking-entry-card__payment-total tabular-nums">
+              {fmt(row.driverPaid)} / {fmt(row.totalDue)} د.أ
+            </span>
+          </div>
+
+          <div className="tracking-entry-card__progress-track">
+            <div
+              className="tracking-entry-card__progress-fill"
+              style={{ width: `${paidPct}%` }}
+              role="progressbar"
+              aria-valuenow={paidPct}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            />
+          </div>
+
+          <div className="tracking-entry-card__slot-pills">
+            {Array.from({ length: row.rentSchedule.slotCount }, (_, idx) => {
+              const dueLabel = paymentSlotLabelForCycle(idx, row.paymentCycle.dueDatesInMonth);
+              const paid = row.driverPayments[idx] ?? 0;
+              const target = row.installmentTargets[idx] ?? 0;
+              const done = target > 0 && paid >= target;
+              return (
+                <span
+                  key={`${dueLabel}-${idx}`}
+                  className={`tracking-entry-card__slot-pill${done ? ' tracking-entry-card__slot-pill--done' : ''}`}
+                >
+                  {dueLabel} <strong>{fmt(paid)}</strong>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Expense details + notes ── */}
+      {(REPORT_EXPENSE_KEYS.some((k) => row.expenseDetails[k] > 0) || row.notes) && (
+        <div className="tracking-entry-card__extras">
+          <ExpenseDetailsCell row={row} />
+        </div>
+      )}
+
+      {/* ── CTA: complete guarantee ── */}
+      {!isRowEditing && row.remaining > 0 && (
+        <button
+          type="button"
+          className="tracking-entry-card__pay-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenEdit(row);
+          }}
+        >
+          استكمال الضمان
+        </button>
+      )}
+
       {isRowEditing && (
-        <p className="tracking-entry-card__editing-hint text-amber-700 text-xs font-bold text-center py-2">
-          جاري التعديل في النموذج ↑
-        </p>
+        <p className="tracking-entry-card__editing-hint">جاري التعديل في النموذج ↑</p>
       )}
     </article>
   );
@@ -3221,22 +3258,23 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                 {form.month || formatMonthLabel(form.date)}
               </p>
             </label>
-            <PaymentCyclePreview
-              className="block sm:col-span-2 lg:col-span-1"
-              firstPaymentDate={vehiclePaymentSettings.driverFirstPaymentDate}
-              recordAnchor={paymentAnchor}
-              editingPriorCycle={editingPriorCycle}
-            />
-            <label className="block sm:col-span-2 lg:col-span-1">
-              <span className="text-xs font-medium text-slate-500">اسم السائق</span>
-              <input
-                type="text"
-                value={form.driverName}
-                onChange={(e) => onFormChange((f) => ({ ...f, driverName: e.target.value }))}
-                placeholder="اسم السائق لهذا الشهر"
-                className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm entry-touch-input"
+            <div className="block sm:col-span-2 lg:col-span-1 flex flex-col gap-2">
+              <PaymentCyclePreview
+                firstPaymentDate={vehiclePaymentSettings.driverFirstPaymentDate}
+                recordAnchor={paymentAnchor}
+                editingPriorCycle={editingPriorCycle}
               />
-            </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-500">اسم السائق</span>
+                <input
+                  type="text"
+                  value={form.driverName}
+                  onChange={(e) => onFormChange((f) => ({ ...f, driverName: e.target.value }))}
+                  placeholder="اسم السائق لهذا الشهر"
+                  className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm entry-touch-input"
+                />
+              </label>
+            </div>
           </div>
 
           <div className="entry-payments-card entry-form-section entry-form-section--payments">
@@ -4919,10 +4957,10 @@ const SettingsTab: React.FC<{
             </p>
           )}
         </label>
-        {selectedVehicleId && (
+        {vehicleId && (
           <div className="block sm:col-span-2 border-t border-slate-200 pt-4 mt-2">
             <DriverHistoryPanel
-              vehicleId={selectedVehicleId}
+              vehicleId={vehicleId}
               onDriversChanged={(active) => {
                 if (active && active.name !== settings.currentDriverName) {
                   onChange({ ...settings, currentDriverName: active.name });
