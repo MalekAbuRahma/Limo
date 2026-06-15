@@ -100,15 +100,18 @@ assert(entry.net === 560, 'net profit');
 assert(entry.status === 'مدفوع جزئياً', 'entry partial when some paid and remaining');
 assert(entry.month === '05/2020', 'computed month label past');
 
-// dashboard
+// dashboard — F9: netProfit = ownerIncome (driverPaid) - expenses, NOT passenger revenue
 const dash = computeDashboard([entry], 750);
-assert(dash.netProfit === 560, 'dashboard net');
+// driverPaid=250, expenses=190 → ownerNet = 60  (revenue=750 stays as vehicle performance only)
+assert(dash.netProfit === 60, 'dashboard net (F9: owner income - expenses)');
+assert(dash.totalOwnerIncome === 250, 'totalOwnerIncome = driverPaid');
+assert(dash.totalRevenue === 750, 'totalRevenue still tracked (vehicle performance)');
 assert(dash.expenseByCategory.grandTotal === 190, 'expense totals');
 
-// ROI
+// ROI — F9: avgMonthlyNet based on owner income (60), not passenger revenue (560)
 const roi = computeRoiAnalysis([entry], 33000, 7);
-assert(roi.breakEvenMonths === 59, 'break even months'); // ceil(33000/560)
-assert(roi.recoversWithinLife === true, 'recovers within 7 years');
+assert(roi.breakEvenMonths === 550, 'break even months (F9): ceil(33000/60)');
+assert(roi.recoversWithinLife === false, 'does not recover within 7 years at owner income rate');
 assert(roi.lifeMonths === 84, 'life months');
 
 // month key duplicate detection

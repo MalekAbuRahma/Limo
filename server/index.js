@@ -17,8 +17,22 @@ import {
   listVehicleDrivers,
   addVehicleDriver,
   stopVehicleDriver,
+  updateVehicleDriver,
   deleteVehicleDriver,
 } from './db.js';
+import {
+  writeAuditLog,
+  listAuditLog,
+  getDriverProfile,
+  updateDriverProfile,
+  getActiveDriver,
+  calculateDriverRunningBalance,
+  handleDriverWithdrawal,
+  replaceDriver,
+  getDriverSettlement,
+  listDriverAssignments,
+  getFleetPerformanceRanking,
+} from './driverLedger.js';
 import {
   countUsers,
   ensureAdminUser,
@@ -567,10 +581,10 @@ app.get('/api/vehicles/:vehicleId/drivers', requireAuth, async (req, res) => {
 app.post('/api/vehicles/:vehicleId/drivers', requireAuth, async (req, res) => {
   try {
     await assertVehicleAccess(req.user, req.params.vehicleId);
-    const { name, startDate, notes } = req.body ?? {};
+    const { name, startDate, endDate, notes } = req.body ?? {};
     if (!name?.trim()) return res.status(400).json({ error: 'اسم السائق مطلوب' });
     if (!startDate?.trim()) return res.status(400).json({ error: 'تاريخ أول دفعة مطلوب' });
-    const driver = await addVehicleDriver(req.params.vehicleId, { name, startDate, notes });
+    const driver = await addVehicleDriver(req.params.vehicleId, { name, startDate, endDate: endDate ?? null, notes });
     res.status(201).json({ driver });
   } catch (err) {
     if (err?.code === 'VEHICLE_ACCESS_DENIED') return res.status(403).json({ error: err.message });
@@ -594,6 +608,21 @@ app.patch('/api/vehicles/:vehicleId/drivers/:driverId/stop', requireAuth, async 
   }
 });
 
+app.patch('/api/vehicles/:vehicleId/drivers/:driverId', requireAuth, async (req, res) => {
+  try {
+    await assertVehicleAccess(req.user, req.params.vehicleId);
+    const { name, startDate, endDate, monthlyGuarantee, notes } = req.body ?? {};
+    const driver = await updateVehicleDriver(req.params.driverId, { name, startDate, endDate, monthlyGuarantee, notes });
+    res.json({ driver });
+  } catch (err) {
+    if (err?.code === 'VEHICLE_ACCESS_DENIED') return res.status(403).json({ error: err.message });
+    if (err?.code === 'NOT_FOUND') return res.status(404).json({ error: err.message });
+    if (err?.code === 'NO_CHANGES') return res.status(400).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update driver' });
+  }
+});
+
 app.delete('/api/vehicles/:vehicleId/drivers/:driverId', requireAuth, async (req, res) => {
   try {
     await assertVehicleAccess(req.user, req.params.vehicleId);
@@ -604,6 +633,157 @@ app.delete('/api/vehicles/:vehicleId/drivers/:driverId', requireAuth, async (req
     if (err?.code === 'NOT_FOUND') return res.status(404).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: 'Failed to delete driver' });
+  }
+});
+
+// ── F1: Driver Running Balance ─────────────────────────────────────────────
+
+app.get('/api/vehicles/:vehicleId/drivers/:driverId/balance', requireAuth, async (req, res) => {
+  try {
+    await assertVehicleAccess(req.user, req.params.vehicleId);
+    const result = await calculateDriverRunningBalance(req.params.driverId, req.params.vehicleId);
+    res.json(result);
+  } catch (err) {
+    if (err?.code === 'VEHICLE_ACCESS_DENIED') return res.status(403).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to calculate balance' });
+  }
+});
+
+// ── F2: Driver Withdrawal ──────────────────────────────────────────────────
+
+app.post('/api/vehicles/:vehicleId/drivers/:driverId/withdraw', requireAuth, async (req, res) => {
+  try {
+    await assertVehicleAccess(req.user, req.params.vehicleId);
+    const { endDate, monthlyGuarantee } = req.body ?? {};
+    if (!endDate?.trim()) return res.status(400).json({ error: 'endDate is required' });
+    const result = await handleDriverWithdrawal({
+      vehicleId: req.params.vehicleId,
+      driverId: req.params.driverId,
+      endDate,
+      monthlyGuarantee: Number(monthlyGuarantee ?? 750),
+      performedBy: req.user?.id,
+    });
+    res.json(result);
+  } catch (err) {
+    if (err?.code === 'VEHICLE_ACCESS_DENIED') return res.status(403).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to withdraw driver' });
+  }
+});
+
+// ── F3: Driver Replacement ─────────────────────────────────────────────────
+
+app.post('/api/vehicles/:vehicleId/drivers/replace', requireAuth, async (req, res) => {
+  try {
+    await assertVehicleAccess(req.user, req.params.vehicleId);
+    const { currentDriverId, currentDriverEndDate, newDriverName, newDriverStartDate, monthlyGuarantee } = req.body ?? {};
+    if (!newDriverName?.trim()) return res.status(400).json({ error: 'newDriverName is required' });
+    if (!newDriverStartDate?.trim()) return res.status(400).json({ error: 'newDriverStartDate is required' });
+    const result = await replaceDriver({
+      vehicleId: req.params.vehicleId,
+      currentDriverId: currentDriverId || null,
+      currentDriverEndDate: currentDriverEndDate || null,
+      newDriverName,
+      newDriverStartDate,
+      monthlyGuarantee: Number(monthlyGuarantee ?? 750),
+      performedBy: req.user?.id,
+    });
+    res.json(result);
+  } catch (err) {
+    if (err?.code === 'VEHICLE_ACCESS_DENIED') return res.status(403).json({ error: err.message });
+    if (err?.status === 409) return res.status(409).json({ error: err.message, activeDriver: err.activeDriver });
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to replace driver' });
+  }
+});
+
+// ── F6: Driver Settlement ──────────────────────────────────────────────────
+
+app.get('/api/vehicles/:vehicleId/drivers/:driverId/settlement', requireAuth, async (req, res) => {
+  try {
+    await assertVehicleAccess(req.user, req.params.vehicleId);
+    const result = await getDriverSettlement(req.params.vehicleId, req.params.driverId);
+    res.json(result);
+  } catch (err) {
+    if (err?.code === 'VEHICLE_ACCESS_DENIED') return res.status(403).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to get settlement' });
+  }
+});
+
+// ── F4: Audit Log ──────────────────────────────────────────────────────────
+
+app.get('/api/audit-log', requireAdmin, async (req, res) => {
+  try {
+    const { entityType, entityId, limit = '100', offset = '0' } = req.query;
+    const entries = await listAuditLog({
+      entityType: entityType || undefined,
+      entityId: entityId || undefined,
+      limit: parseInt(limit, 10),
+      offset: parseInt(offset, 10),
+    });
+    res.json({ entries });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch audit log' });
+  }
+});
+
+app.get('/api/vehicles/:vehicleId/audit-log', requireAuth, async (req, res) => {
+  try {
+    await assertVehicleAccess(req.user, req.params.vehicleId);
+    const { limit = '100', offset = '0' } = req.query;
+    const entries = await listAuditLog({
+      entityId: req.params.vehicleId,
+      limit: parseInt(limit, 10),
+      offset: parseInt(offset, 10),
+    });
+    res.json({ entries });
+  } catch (err) {
+    if (err?.code === 'VEHICLE_ACCESS_DENIED') return res.status(403).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch audit log' });
+  }
+});
+
+// ── F7: Active Driver Check ────────────────────────────────────────────────
+
+app.get('/api/vehicles/:vehicleId/drivers/active', requireAuth, async (req, res) => {
+  try {
+    await assertVehicleAccess(req.user, req.params.vehicleId);
+    const driver = await getActiveDriver(req.params.vehicleId);
+    res.json({ driver });
+  } catch (err) {
+    if (err?.code === 'VEHICLE_ACCESS_DENIED') return res.status(403).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to get active driver' });
+  }
+});
+
+// ── F8: Fleet Performance Ranking ─────────────────────────────────────────
+
+app.get('/api/fleet/performance-ranking', requireAuth, async (req, res) => {
+  try {
+    const ranking = await getFleetPerformanceRanking(req.user?.id, req.user?.role);
+    res.json(ranking);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to compute ranking' });
+  }
+});
+
+// ── Driver Profile Update ──────────────────────────────────────────────────
+
+app.patch('/api/vehicles/:vehicleId/drivers/:driverId/profile', requireAuth, async (req, res) => {
+  try {
+    await assertVehicleAccess(req.user, req.params.vehicleId);
+    const updated = await updateDriverProfile(req.params.driverId, req.body, req.user?.id);
+    res.json({ driver: updated });
+  } catch (err) {
+    if (err?.code === 'VEHICLE_ACCESS_DENIED') return res.status(403).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update driver profile' });
   }
 });
 

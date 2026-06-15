@@ -88,6 +88,15 @@ export interface MonthlyEntry {
   paymentComplete?: boolean;
   /** الضمان المطبّق عند الحفظ — لا يتغيّر إذا غيّرت الإعدادات لاحقاً */
   monthlyGuarantee?: number;
+  // F5: Expense classification
+  expenseType?: ExpenseType;
+  // F1: Running balance ledger fields (snapshot at save time)
+  previousBalanceCarriedForward?: number;
+  currentGuaranteeDue?: number;
+  totalOutstandingBalance?: number;
+  // F4: Audit
+  createdBy?: string;
+  updatedBy?: string;
 }
 
 export type FontSizeOption = 'normal' | 'large' | 'xlarge';
@@ -177,6 +186,8 @@ export interface OilChangeRecord {
   /** العداد المتوقع عند التغيير القادم */
   nextOdometer: number;
   notes: string;
+  /** اسم السائق النشط عند تغيير الزيت */
+  driverName?: string;
 }
 
 export interface TaxiAppState {
@@ -252,6 +263,137 @@ export interface VehicleCreateInput {
   vehicleLifeYears?: number;
   /** المستخدم المسؤول — إجباري عند الإنشاء */
   assignedUserId: string;
+}
+
+// ─── F5: Expense Classification ─────────────────────────────────────────────
+
+/** Normal = routine (oil, wash, minor service). Major = structural (engine, gearbox, major accident). */
+export type ExpenseType = 'normal' | 'major';
+
+export const EXPENSE_TYPE_LABELS: Record<ExpenseType, string> = {
+  normal: 'عادي',
+  major: 'رئيسي',
+};
+
+// ─── F1/F2: Driver Profile & Assignment Entries ──────────────────────────────
+
+/**
+ * Extended driver profile — wraps vehicle_drivers with contact info and
+ * the live running outstanding balance.
+ */
+export interface DriverProfile {
+  id: string;
+  vehicleId: string;
+  name: string;
+  startDate: string;
+  endDate?: string | null;
+  /** Optional contact info */
+  phoneNumber?: string;
+  nationalId?: string;
+  emergencyContact?: string;
+  /** Free-form operational notes */
+  driverNotes?: string;
+  /** Accumulated unpaid balance across all assignment history */
+  currentOutstandingBalance: number;
+  notes: string;
+  createdAt?: string;
+  createdBy?: string;
+  updatedBy?: string;
+}
+
+/**
+ * One driver's financial slice within a calendar month.
+ * A MonthlyEntry may have 1..N of these when mid-month handoffs occur.
+ */
+export interface DriverAssignmentEntry {
+  id: string;
+  vehicleId: string;
+  monthlyEntryId?: string | null;
+  driverId: string;
+  driverName?: string;
+  startDate: string;
+  endDate?: string | null;
+  daysWorked: number;
+  proratedGuarantee: number;
+  /** Balance brought from previous months for this driver */
+  previousBalanceCarriedForward: number;
+  paymentsReceived: number;
+  remainingBalance: number;
+  isActive: boolean;
+  createdBy?: string;
+  createdAt?: string;
+}
+
+// ─── F4: Audit Logging ───────────────────────────────────────────────────────
+
+export type AuditActionType =
+  | 'driver_added'
+  | 'driver_updated'
+  | 'driver_removed'
+  | 'driver_withdrawn'
+  | 'driver_replaced'
+  | 'guarantee_changed'
+  | 'payment_added'
+  | 'payment_updated'
+  | 'payment_deleted'
+  | 'expense_added'
+  | 'expense_updated'
+  | 'expense_deleted'
+  | 'entry_created'
+  | 'entry_updated'
+  | 'entry_deleted'
+  | 'vehicle_created'
+  | 'vehicle_updated';
+
+export interface AuditLogEntry {
+  id: string;
+  entityType: string;
+  entityId: string;
+  actionType: AuditActionType;
+  oldValue?: Record<string, unknown> | null;
+  newValue?: Record<string, unknown> | null;
+  performedBy?: string | null;
+  performedAt: string;
+}
+
+// ─── F6: Driver Settlement ───────────────────────────────────────────────────
+
+export interface DriverSettlement {
+  driver: DriverProfile;
+  vehicleLabel: string;
+  monthlyGuarantee: number;
+  /** Total driver payments received this month */
+  amountPaid: number;
+  /** Remaining for the current month (guarantee - paid) */
+  currentMonthRemaining: number;
+  /** Carried-forward balance from prior months */
+  previousBalance: number;
+  /** previousBalance + currentMonthRemaining */
+  totalOutstanding: number;
+  /** Chronological payment history */
+  paymentHistory: Array<{
+    date: string;
+    amount: number;
+    month: string;
+    entryId: string;
+  }>;
+  currentStatus: 'active' | 'withdrawn' | 'settled';
+}
+
+// ─── F8: Fleet Performance Ranking ──────────────────────────────────────────
+
+export interface VehicleRankEntry {
+  vehicleId: string;
+  vehicleLabel: string;
+  value: number;
+  rank: number;
+}
+
+export interface FleetPerformanceRanking {
+  bestPerforming: VehicleRankEntry[];
+  worstPerforming: VehicleRankEntry[];
+  highestRevenue: VehicleRankEntry[];
+  highestExpense: VehicleRankEntry[];
 }
 
 export const DEFAULT_SETTINGS: TaxiSettings = {

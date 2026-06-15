@@ -102,6 +102,11 @@ export async function deleteVehicleDriver(driverId) {
   return f.deleteVehicleDriver(driverId);
 }
 
+export async function updateVehicleDriver(driverId, payload) {
+  const f = await fleet();
+  return f.updateVehicleDriver(driverId, payload);
+}
+
 /** Reset all tables — tests only */
 export async function resetDbForTests() {
   await initPool();

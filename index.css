@@ -1554,18 +1554,17 @@ body {
   display: flex;
   flex-direction: column;
   background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 0.75rem;
+  border: 1px solid #e8edf3;
+  border-radius: 1rem;
   overflow: hidden;
   cursor: pointer;
   text-align: right;
-  transition: box-shadow 0.2s, border-color 0.2s;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+  transition: border-color 0.2s, transform 0.15s;
 }
 
 #taxi-app .vehicle-garage-card:hover {
-  border-color: #93c5fd;
-  box-shadow: 0 4px 14px rgb(37 99 235 / 0.1);
+  border-color: #bfdbfe;
+  transform: translateY(-2px);
 }
 
 #taxi-app .vehicle-garage-card:focus-visible {
@@ -1574,8 +1573,8 @@ body {
 }
 
 #taxi-app .vehicle-garage-card-photo {
-  height: 6.5rem;
-  background: linear-gradient(135deg, #f1f5f9, #e2e8f0);
+  height: 8rem;
+  background: linear-gradient(135deg, #f0f4f8, #dde6f0);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1595,11 +1594,11 @@ body {
 }
 
 #taxi-app .vehicle-garage-card-body {
-  padding: 0.65rem 0.75rem 0.75rem;
+  padding: 0.75rem 0.875rem 0.875rem;
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.4rem;
 }
 
 #taxi-app .vehicle-garage-card-body h3 {
@@ -2205,6 +2204,14 @@ body {
   border-top: 1px dashed #bfdbfe;
 }
 
+#taxi-app .entry-installment-field {
+  transition: box-shadow 0.15s;
+}
+
+#taxi-app .entry-installment-field:focus-within {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+}
+
 #taxi-app .entry-installment-field label {
   display: block;
   text-align: right;
@@ -2212,9 +2219,9 @@ body {
 
 #taxi-app .entry-installment-field input {
   width: 100%;
-  max-width: 7.5rem;
+  max-width: none;
   margin-right: 0;
-  margin-left: auto;
+  margin-left: 0;
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
@@ -2318,6 +2325,21 @@ body {
   background: #f8fafc;
 }
 
+/* ── entry-form-meta responsive grid ── */
+#taxi-app .entry-form-meta {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr;       /* mobile: stack */
+  align-items: end;
+}
+
+@media (min-width: 640px) {
+  #taxi-app .entry-form-meta {
+    grid-template-columns: auto 1fr auto;  /* desktop: 3 cols */
+    gap: 0.65rem;
+  }
+}
+
 #taxi-app .entry-month-year-field {
   display: flex;
   align-items: stretch;
@@ -2417,18 +2439,21 @@ body {
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 639px) {
+  /* ── Installment inputs: keep 3 cols but tighten gap ── */
   #taxi-app .entry-installment-inputs {
-    grid-template-columns: 1fr;
-    gap: 0.75rem;
+    gap: 0.4rem;
   }
 
   #taxi-app .entry-installment-field input {
     max-width: none;
     margin-left: 0;
     margin-right: 0;
+    padding: 0.5rem 0.25rem;
+    font-size: 0.9rem;
   }
 
+  /* ── Revenue field: full width ── */
   #taxi-app .entry-revenue-field {
     width: 100%;
     align-items: stretch;
@@ -2440,12 +2465,28 @@ body {
     padding: 0.65rem 0.75rem;
   }
 
+  /* ── Payment card head: stack vertically ── */
   #taxi-app .entry-payments-card__head {
     flex-direction: column;
     align-items: stretch;
     text-align: right;
   }
 
+  /* ── Chips: larger tap targets, full-width rows ── */
+  #taxi-app .entry-installment-chips {
+    justify-content: flex-start;
+    gap: 0.5rem;
+  }
+
+  #taxi-app .entry-installment-chip {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: center;
+    padding: 0.4rem 0.5rem;
+    font-size: 0.8rem;
+  }
+
+  /* ── Summary grid: 2 cols ── */
   #taxi-app .entry-form-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.4rem;
@@ -2458,6 +2499,73 @@ body {
 
   #taxi-app .entry-form-summary__item strong {
     font-size: 0.8125rem;
+  }
+
+  /* ── Month/year selects: larger touch targets ── */
+  #taxi-app .entry-month-year-field__part {
+    padding: 0.75rem 0.5rem;
+    font-size: 1rem;
+  }
+
+  /* ── Form panel: tighter padding on small phones ── */
+  #taxi-app .entry-form-panel {
+    padding: 0.75rem;
+  }
+
+  #taxi-app .entry-form-section--meta {
+    padding: 0.75rem;
+  }
+
+  /* ── Tracking cards: compact on mobile ── */
+  #taxi-app .tracking-entry-card__head {
+    padding: 0.65rem 0.75rem 0.4rem 0.75rem;
+  }
+
+  #taxi-app .tracking-entry-card__driver-row {
+    padding: 0 0.75rem 0.5rem 0.75rem;
+  }
+
+  /* Stats grid: 2×2 on narrow screens instead of 4×1 */
+  #taxi-app .tracking-entry-card__stats-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  #taxi-app .tracking-entry-card__stat-cell {
+    padding: 0.45rem 0.5rem;
+  }
+
+  #taxi-app .tracking-entry-card__stat-value {
+    font-size: 0.8rem;
+  }
+
+  /* Payment section */
+  #taxi-app .tracking-entry-card__payment {
+    padding: 0.5rem 0.75rem;
+  }
+
+  /* Payment chips inside cards: wrap nicely */
+  #taxi-app .tracking-entry-card .entry-installment-chips {
+    gap: 0.4rem;
+  }
+
+  #taxi-app .tracking-entry-card .entry-installment-chip {
+    flex: 1 1 calc(33% - 0.4rem);
+    min-width: 80px;
+    justify-content: center;
+    font-size: 0.7rem;
+    padding: 0.3rem 0.35rem;
+  }
+
+  /* ── Filter bar: stack ── */
+  #taxi-app .tracking-filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  #taxi-app .tracking-filter-select,
+  #taxi-app .tracking-filter-input {
+    width: 100%;
+    min-width: 0;
   }
 }
 
@@ -3013,11 +3121,11 @@ body > .tracking-row-menu-portal .tracking-row-menu__item--danger:hover {
 #taxi-app .tracking-entry-list {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0.65rem;
+  gap: 0.875rem;
   overflow: visible;
 }
 
-@media (min-width: 640px) {
+@media (min-width: 600px) {
   #taxi-app .tracking-entry-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3029,15 +3137,9 @@ body > .tracking-row-menu-portal .tracking-row-menu__item--danger:hover {
   }
 }
 
-@media (min-width: 1280px) {
+@media (min-width: 1400px) {
   #taxi-app .tracking-entry-list {
     grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
-@media (min-width: 1600px) {
-  #taxi-app .tracking-entry-list {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
 
@@ -3063,10 +3165,16 @@ body > .tracking-row-menu-portal .tracking-row-menu__item--danger:hover {
   flex: 1;
   min-width: 0;
   border: 1px solid #e2e8f0;
-  border-radius: 0.5rem;
+  border-radius: 0.625rem;
   padding: 0.55rem 0.75rem;
   font-size: 1rem;
   background: #fff;
+  transition: border-color 0.15s;
+}
+
+#taxi-app .tracking-filter-select:focus {
+  outline: none;
+  border-color: #93c5fd;
 }
 
 @media (min-width: 640px) {
@@ -3080,11 +3188,17 @@ body > .tracking-row-menu-portal .tracking-row-menu__item--danger:hover {
   min-height: 44px;
   padding: 0.55rem 0.85rem;
   font-size: 0.875rem;
-  color: #475569;
+  color: #64748b;
   border: 1px solid #e2e8f0;
-  border-radius: 0.5rem;
-  background: #fff;
+  border-radius: 0.625rem;
+  background: #f8fafc;
   cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+#taxi-app .tracking-filter-clear:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
 }
 
 @media (min-width: 640px) {
@@ -3095,38 +3209,47 @@ body > .tracking-row-menu-portal .tracking-row-menu__item--danger:hover {
 }
 
 /* Entry cards */
-/* ─── Entry Card v2 ─────────────────────────────────── */
+/* ─── Entry Card v3 — modern redesign ────────────────── */
 #taxi-app .tracking-entry-card {
   position: relative;
   overflow: hidden;
-  border: 1.5px solid #e2e8f0;
-  border-radius: 0.875rem;
+  border: 1px solid #e8edf3;
+  border-radius: 1rem;
   background: #fff;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 1px 4px rgb(15 23 42 / 0.06);
+  transition: border-color 0.15s, transform 0.12s;
 }
 
-/* Right-side accent strip (start side in RTL) */
-#taxi-app .tracking-entry-card::after {
+#taxi-app .tracking-entry-card:hover {
+  border-color: #c7d4e2;
+  transform: translateY(-1px);
+}
+
+/* Top accent bar — replaces right-side strip */
+#taxi-app .tracking-entry-card::before {
   content: '';
   position: absolute;
   top: 0;
-  bottom: 0;
+  left: 0;
   right: 0;
-  width: 4px;
-  background: #e2e8f0;
+  height: 3px;
+  background: #cbd5e1;
   pointer-events: none;
 }
 
-#taxi-app .tracking-entry-card--late        { border-color: #fecaca; background: #fff5f5; }
-#taxi-app .tracking-entry-card--late::after { background: #f87171; }
+/* Remove old right strip */
+#taxi-app .tracking-entry-card::after { display: none; }
 
-#taxi-app .tracking-entry-card--progress        { border-color: #fde68a; background: #fffdf5; }
-#taxi-app .tracking-entry-card--progress::after { background: #f59e0b; }
+/* Status variants — top bar + subtle bg tint */
+#taxi-app .tracking-entry-card--late         { border-color: #fdd0d0; background: #fffbfb; }
+#taxi-app .tracking-entry-card--late::before { background: linear-gradient(90deg, #f87171, #fb923c); }
 
-#taxi-app .tracking-entry-card--settled        { border-color: #bbf7d0; background: #f5fff9; }
-#taxi-app .tracking-entry-card--settled::after { background: #34d399; }
+#taxi-app .tracking-entry-card--progress         { border-color: #fde58a; background: #fffef5; }
+#taxi-app .tracking-entry-card--progress::before { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+
+#taxi-app .tracking-entry-card--settled         { border-color: #bbf7d0; background: #f9fffe; }
+#taxi-app .tracking-entry-card--settled::before { background: linear-gradient(90deg, #10b981, #34d399); }
 
 #taxi-app .payment-status-control {
   display: flex;
@@ -3179,42 +3302,47 @@ body > .tracking-row-menu-portal .tracking-row-menu__item--danger:hover {
 #taxi-app .tracking-entry-card--editing {
   border-color: #fbbf24;
   background: #fffbeb;
-  box-shadow: 0 0 0 2px #fcd34d;
+  outline: 2px solid #fcd34d;
+  outline-offset: 0;
 }
-#taxi-app .tracking-entry-card--editing::after { background: #fbbf24; }
+#taxi-app .tracking-entry-card--editing::before { background: #f59e0b; }
 
 /* ── Head ── */
 #taxi-app .tracking-entry-card__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.4rem;
-  padding: 0.55rem 1.1rem 0.45rem 0.65rem;
+  gap: 0.5rem;
+  padding: 0.75rem 0.875rem 0.5rem 0.875rem;
 }
 
 #taxi-app .tracking-entry-card__head-meta {
   display: flex;
-  align-items: baseline;
-  gap: 0.35rem;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 #taxi-app .tracking-entry-card__month {
-  font-size: 1rem;
+  font-size: 0.9375rem;
   font-weight: 800;
   color: #0f172a;
   line-height: 1.2;
+  letter-spacing: -0.01em;
 }
 
 #taxi-app .tracking-entry-card__num {
   font-size: 0.6875rem;
   font-weight: 600;
   color: #94a3b8;
+  background: #f1f5f9;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.25rem;
 }
 
 #taxi-app .tracking-entry-card__head-actions {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.35rem;
   flex-shrink: 0;
 }
 
@@ -3222,11 +3350,11 @@ body > .tracking-row-menu-portal .tracking-row-menu__item--danger:hover {
 #taxi-app .tracking-entry-card__driver-row {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0 1.1rem 0.4rem 0.65rem;
-  font-size: 0.7rem;
+  gap: 0.35rem;
+  padding: 0 0.875rem 0.6rem 0.875rem;
+  font-size: 0.75rem;
   font-weight: 600;
-  color: #475569;
+  color: #334155;
 }
 
 #taxi-app .tracking-entry-card__driver-row svg {
@@ -3234,37 +3362,35 @@ body > .tracking-row-menu-portal .tracking-row-menu__item--danger:hover {
   color: #94a3b8;
 }
 
-/* ── Finance stats 2×2 grid ── */
+/* ── Finance stats — horizontal strip ── */
 #taxi-app .tracking-entry-card__stats-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
   border-top: 1px solid #f1f5f9;
   border-bottom: 1px solid #f1f5f9;
+  background: #fafbfc;
 }
 
 #taxi-app .tracking-entry-card__stat-cell {
-  padding: 0.4rem 0.65rem;
+  padding: 0.5rem 0.625rem;
   display: flex;
   flex-direction: column;
-  gap: 0.08rem;
+  gap: 0.15rem;
+  align-items: center;
+  text-align: center;
 }
 
-/* vertical divider between the two columns (in RTL: right col = odd, left col = even) */
-#taxi-app .tracking-entry-card__stat-cell:nth-child(odd) {
-  border-left: 1px solid #f1f5f9;
-}
-
-/* horizontal divider between rows */
-#taxi-app .tracking-entry-card__stat-cell:nth-child(3),
-#taxi-app .tracking-entry-card__stat-cell:nth-child(4) {
-  border-top: 1px solid #f1f5f9;
+#taxi-app .tracking-entry-card__stat-cell + .tracking-entry-card__stat-cell {
+  border-right: 1px solid #eef1f6;
 }
 
 #taxi-app .tracking-entry-card__stat-label {
-  font-size: 0.6rem;
-  font-weight: 600;
+  font-size: 0.5625rem;
+  font-weight: 700;
   color: #94a3b8;
   line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 #taxi-app .tracking-entry-card__stat-value {
@@ -3276,15 +3402,15 @@ body > .tracking-row-menu-portal .tracking-row-menu__item--danger:hover {
 
 /* ── Payment section ── */
 #taxi-app .tracking-entry-card__payment {
-  padding: 0.5rem 1.1rem 0.5rem 0.65rem;
+  padding: 0.6rem 0.875rem 0.6rem 0.875rem;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.4rem;
 }
 
 #taxi-app .tracking-entry-card__payment-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
 }
@@ -3296,16 +3422,17 @@ body > .tracking-row-menu-portal .tracking-row-menu__item--danger:hover {
 }
 
 #taxi-app .tracking-entry-card__payment-total {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 800;
   color: #0f172a;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Progress bar */
 #taxi-app .tracking-entry-card__progress-track {
-  height: 5px;
+  height: 6px;
   border-radius: 99px;
-  background: #e2e8f0;
+  background: #e9eef5;
   overflow: hidden;
 }
 
@@ -3313,7 +3440,7 @@ body > .tracking-row-menu-portal .tracking-row-menu__item--danger:hover {
   height: 100%;
   border-radius: 99px;
   background: #10b981;
-  transition: width 0.35s ease;
+  transition: width 0.4s ease;
   min-width: 0;
 }
 
@@ -3333,12 +3460,12 @@ body > .tracking-row-menu-portal .tracking-row-menu__item--danger:hover {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  padding: 0.2rem 0.5rem;
-  border-radius: 99px;
+  padding: 0.22rem 0.55rem;
+  border-radius: 0.375rem;
   font-size: 0.625rem;
   font-weight: 500;
   background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #e8edf3;
   color: #64748b;
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
@@ -3356,8 +3483,8 @@ body > .tracking-row-menu-portal .tracking-row-menu__item--danger:hover {
 
 /* ── Extras ── */
 #taxi-app .tracking-entry-card__extras {
-  padding: 0.4rem 1.1rem 0.45rem 0.65rem;
-  border-top: 1px solid #f8fafc;
+  padding: 0.45rem 0.875rem 0.5rem 0.875rem;
+  border-top: 1px solid #f1f5f9;
 }
 
 #taxi-app .tracking-entry-card__extras .space-y-1\.5 {
@@ -3370,32 +3497,35 @@ body > .tracking-row-menu-portal .tracking-row-menu__item--danger:hover {
 #taxi-app .tracking-entry-card__pay-btn {
   display: block;
   width: 100%;
-  padding: 0.6rem 0.75rem;
+  margin-top: auto;
+  padding: 0.65rem 0.875rem;
   border: none;
-  border-top: 1px solid #047857;
-  background: #059669;
+  border-top: 1px solid rgba(5, 150, 105, 0.2);
+  background: linear-gradient(135deg, #059669, #0d9488);
   color: #fff;
   font-size: 0.8125rem;
   font-weight: 700;
   text-align: center;
   cursor: pointer;
   min-height: 2.5rem;
-  transition: background 0.15s ease;
-  letter-spacing: 0.01em;
+  transition: opacity 0.15s ease;
+  letter-spacing: 0.02em;
+  border-radius: 0 0 0.9375rem 0.9375rem;
 }
 
-#taxi-app .tracking-entry-card__pay-btn:hover  { background: #047857; }
-#taxi-app .tracking-entry-card__pay-btn:active { background: #065f46; }
+#taxi-app .tracking-entry-card__pay-btn:hover  { opacity: 0.9; }
+#taxi-app .tracking-entry-card__pay-btn:active { opacity: 0.8; }
 
 /* ── Editing hint ── */
 #taxi-app .tracking-entry-card__editing-hint {
-  padding: 0.5rem 0.75rem;
+  padding: 0.5rem 0.875rem;
   text-align: center;
   font-size: 0.75rem;
   font-weight: 700;
   color: #b45309;
   background: #fffbeb;
   border-top: 1px solid #fde68a;
+  border-radius: 0 0 0.9375rem 0.9375rem;
   margin: 0;
 }
 
@@ -3408,8 +3538,40 @@ body > .tracking-row-menu-portal .tracking-row-menu__item--danger:hover {
 
 #taxi-app[data-theme='dark'] .tracking-entry-card {
   background: #1e293b;
+  border-color: #334155;
+}
+
+#taxi-app[data-theme='dark'] .tracking-entry-card:hover {
   border-color: #475569;
 }
+
+#taxi-app[data-theme='dark'] .tracking-entry-card__stats-grid {
+  background: #172033;
+}
+
+#taxi-app[data-theme='dark'] .tracking-entry-card__stat-cell + .tracking-entry-card__stat-cell {
+  border-right-color: #334155;
+}
+
+#taxi-app[data-theme='dark'] .tracking-entry-card__stats-grid,
+#taxi-app[data-theme='dark'] .tracking-entry-card__stats-grid > * {
+  border-color: #334155;
+}
+
+#taxi-app[data-theme='dark'] .tracking-entry-card__slot-pill {
+  background: #1e293b;
+  border-color: #334155;
+  color: #94a3b8;
+}
+
+#taxi-app[data-theme='dark'] .tracking-entry-card--late    { background: #2a1b1b; border-color: #7f1d1d; }
+#taxi-app[data-theme='dark'] .tracking-entry-card--progress { background: #271f0f; border-color: #78350f; }
+#taxi-app[data-theme='dark'] .tracking-entry-card--settled  { background: #0f2d22; border-color: #14532d; }
+
+#taxi-app[data-theme='dark'] .tracking-entry-card__month { color: #f1f5f9; }
+#taxi-app[data-theme='dark'] .tracking-entry-card__driver-row { color: #cbd5e1; }
+#taxi-app[data-theme='dark'] .tracking-entry-card__payment-total { color: #f1f5f9; }
+#taxi-app[data-theme='dark'] .tracking-entry-card__progress-track { background: #334155; }
 
 #taxi-app[data-theme='dark'] .entry-form-actions {
   background: linear-gradient(180deg, rgb(30 41 59 / 0.95) 0%, #1e293b 35%);

@@ -7,6 +7,7 @@ import DeletionApprovalsPanel, { DeletionApprovalsButton } from './DeletionAppro
 import HomeSettingsTab from './HomeSettingsTab';
 import { DisplayPreferencesPanel, SettingsSection } from './SettingsUi';
 import MonthlyEntryConfirmModal from './MonthlyEntryConfirmModal';
+import { DashboardStatReport, type DashboardReportType } from './DashboardStatReports';
 import type { UiLanguage } from '../types/uiLanguage';
 import type { UserSession } from '../utils/taxiAuth';
 import {
@@ -118,7 +119,6 @@ import {
   sortEntriesByMonth,
   paginateEntries,
   findEntryPage,
-  getUniqueDriverNames,
   loadTrackingViewMode,
   loadTrackingSortOrder,
   TRACKING_VIEW_STORAGE_KEY,
@@ -154,6 +154,7 @@ import { PAYMENT_MODE_LABELS } from '../utils/taxiPaymentCycle';
 import { formatIsoDateDisplay } from '../utils/taxiCalendarIso';
 import { PaymentCyclePreview } from './PaymentCyclePreview';
 import { DriverHistoryPanel } from './DriverHistoryPanel';
+import { VehicleDriver, fetchVehicleDrivers } from '../utils/taxiApi';
 import {
   applyPaymentCycleSettingsPatch,
   resolvePaymentAnchor,
@@ -277,6 +278,228 @@ const VehicleHeaderBrand: React.FC<{
   );
 };
 
+// ── Image crop modal ──────────────────────────────────────────────────────────
+function cropImageFromDataUrl(
+  src: string,
+  cropPct: { x: number; y: number; w: number; h: number }
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const sx = (cropPct.x / 100) * img.naturalWidth;
+      const sy = (cropPct.y / 100) * img.naturalHeight;
+      const sw = (cropPct.w / 100) * img.naturalWidth;
+      const sh = (cropPct.h / 100) * img.naturalHeight;
+      const MAX_W = 480, MAX_H = 320;
+      const scale = Math.min(1, MAX_W / sw, MAX_H / sh);
+      const canvas = document.createElement('canvas');
+      canvas.width  = Math.max(1, Math.round(sw * scale));
+      canvas.height = Math.max(1, Math.round(sh * scale));
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return reject(new Error('تعذّر معالجة الصورة'));
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => reject(new Error('تعذّر تحميل الصورة'));
+    img.src = src;
+  });
+}
+
+interface CropRect { x: number; y: number; w: number; h: number }
+
+const ImageCropModal: React.FC<{
+  src: string;
+  onConfirm: (cropped: string) => void;
+  onCancel: () => void;
+}> = ({ src, onConfirm, onCancel }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [crop, setCrop] = useState<CropRect>({ x: 10, y: 10, w: 80, h: 80 });
+  const [dragging, setDragging] = useState<null | 'move' | 'se' | 'sw' | 'ne' | 'nw'>(null);
+  const dragStart = useRef<{ mx: number; my: number; crop: CropRect } | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const MIN_SIZE = 10;
+
+  const toRelative = (e: React.MouseEvent | React.TouchEvent) => {
+    const el = containerRef.current;
+    if (!el) return { rx: 0, ry: 0 };
+    const rect = el.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+    return {
+      rx: ((clientX - rect.left) / rect.width)  * 100,
+      ry: ((clientY - rect.top)  / rect.height) * 100,
+    };
+  };
+
+  const onPointerDown = (e: React.MouseEvent | React.TouchEvent, handle: typeof dragging) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const { rx, ry } = toRelative(e);
+    dragStart.current = { mx: rx, my: ry, crop: { ...crop } };
+    setDragging(handle);
+  };
+
+  const onPointerMove = useCallback((e: MouseEvent | TouchEvent) => {
+    if (!dragging || !dragStart.current) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
+    const rx = ((clientX - rect.left) / rect.width)  * 100;
+    const ry = ((clientY - rect.top)  / rect.height) * 100;
+    const dx = rx - dragStart.current.mx;
+    const dy = ry - dragStart.current.my;
+    const c  = dragStart.current.crop;
+
+    setCrop((prev) => {
+      if (dragging === 'move') {
+        return {
+          x: clamp(c.x + dx, 0, 100 - prev.w),
+          y: clamp(c.y + dy, 0, 100 - prev.h),
+          w: prev.w, h: prev.h,
+        };
+      }
+      let { x, y, w, h } = c;
+      if (dragging === 'se') {
+        w = clamp(c.w + dx, MIN_SIZE, 100 - x);
+        h = clamp(c.h + dy, MIN_SIZE, 100 - y);
+      } else if (dragging === 'sw') {
+        const nx = clamp(c.x + dx, 0, c.x + c.w - MIN_SIZE);
+        w = c.x + c.w - nx; x = nx;
+        h = clamp(c.h + dy, MIN_SIZE, 100 - y);
+      } else if (dragging === 'ne') {
+        w = clamp(c.w + dx, MIN_SIZE, 100 - x);
+        const ny = clamp(c.y + dy, 0, c.y + c.h - MIN_SIZE);
+        h = c.y + c.h - ny; y = ny;
+      } else if (dragging === 'nw') {
+        const nx = clamp(c.x + dx, 0, c.x + c.w - MIN_SIZE);
+        w = c.x + c.w - nx; x = nx;
+        const ny = clamp(c.y + dy, 0, c.y + c.h - MIN_SIZE);
+        h = c.y + c.h - ny; y = ny;
+      }
+      return { x, y, w, h };
+    });
+  }, [dragging]);
+
+  const onPointerUp = useCallback(() => { setDragging(null); dragStart.current = null; }, []);
+
+  useEffect(() => {
+    window.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('touchmove', onPointerMove, { passive: false });
+    window.addEventListener('mouseup', onPointerUp);
+    window.addEventListener('touchend', onPointerUp);
+    return () => {
+      window.removeEventListener('mousemove', onPointerMove);
+      window.removeEventListener('touchmove', onPointerMove);
+      window.removeEventListener('mouseup', onPointerUp);
+      window.removeEventListener('touchend', onPointerUp);
+    };
+  }, [onPointerMove, onPointerUp]);
+
+  const handleConfirm = async () => {
+    setSaving(true);
+    try {
+      const result = await cropImageFromDataUrl(src, crop);
+      onConfirm(result);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReset = () => setCrop({ x: 0, y: 0, w: 100, h: 100 });
+
+  const HANDLE = 'absolute w-4 h-4 rounded-full bg-white border-2 border-blue-500 cursor-pointer z-20 -translate-x-1/2 -translate-y-1/2';
+
+  return createPortal(
+    <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/70 p-4" dir="rtl">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col gap-4 p-5">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-bold text-slate-800">قص الصورة</h3>
+          <p className="text-xs text-slate-500">اسحب الإطار أو زواياه لاختيار المنطقة</p>
+        </div>
+
+        {/* Crop area */}
+        <div
+          ref={containerRef}
+          className="relative select-none overflow-hidden rounded-lg border border-slate-200 bg-slate-100"
+          style={{ userSelect: 'none', touchAction: 'none' }}
+        >
+          <img src={src} alt="" className="w-full h-auto block pointer-events-none" draggable={false} />
+
+          {/* Dark overlay outside crop */}
+          <div className="absolute inset-0 pointer-events-none" style={{
+            background: `linear-gradient(to bottom,
+              rgba(0,0,0,0.45) ${crop.y}%,
+              transparent ${crop.y}%,
+              transparent ${crop.y + crop.h}%,
+              rgba(0,0,0,0.45) ${crop.y + crop.h}%)`,
+          }} />
+          <div className="absolute inset-0 pointer-events-none" style={{
+            background: `linear-gradient(to right,
+              rgba(0,0,0,0.45) ${crop.x}%,
+              transparent ${crop.x}%,
+              transparent ${crop.x + crop.w}%,
+              rgba(0,0,0,0.45) ${crop.x + crop.w}%)`,
+            top: `${crop.y}%`, height: `${crop.h}%`,
+          }} />
+
+          {/* Crop box border */}
+          <div
+            className="absolute border-2 border-blue-400 cursor-move z-10"
+            style={{ left:`${crop.x}%`, top:`${crop.y}%`, width:`${crop.w}%`, height:`${crop.h}%` }}
+            onMouseDown={(e) => onPointerDown(e, 'move')}
+            onTouchStart={(e) => onPointerDown(e, 'move')}
+          >
+            {/* Rule-of-thirds grid */}
+            <div className="absolute inset-0 pointer-events-none opacity-40">
+              <div className="absolute w-px bg-white/70 h-full" style={{ left: '33.3%' }} />
+              <div className="absolute w-px bg-white/70 h-full" style={{ left: '66.6%' }} />
+              <div className="absolute h-px bg-white/70 w-full" style={{ top: '33.3%' }} />
+              <div className="absolute h-px bg-white/70 w-full" style={{ top: '66.6%' }} />
+            </div>
+          </div>
+
+          {/* Corner handles */}
+          {(['nw','ne','sw','se'] as const).map((h) => (
+            <div
+              key={h}
+              className={HANDLE}
+              style={{
+                left: h.endsWith('e') ? `${crop.x + crop.w}%` : `${crop.x}%`,
+                top:  h.startsWith('s') ? `${crop.y + crop.h}%` : `${crop.y}%`,
+                cursor: h === 'nw' || h === 'se' ? 'nwse-resize' : 'nesw-resize',
+              }}
+              onMouseDown={(e) => onPointerDown(e, h)}
+              onTouchStart={(e) => onPointerDown(e, h)}
+            />
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between gap-2">
+          <button type="button" onClick={handleReset}
+            className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600">
+            تحديد الكل
+          </button>
+          <div className="flex gap-2">
+            <button type="button" onClick={onCancel}
+              className="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">
+              إلغاء
+            </button>
+            <button type="button" onClick={handleConfirm} disabled={saving}
+              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {saving ? '...' : 'تأكيد القص'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+};
+
 const VehicleImageSettingsField: React.FC<{
   vehicleImage?: string;
   onImageChange: (image: string) => void;
@@ -284,68 +507,71 @@ const VehicleImageSettingsField: React.FC<{
 }> = ({ vehicleImage, onImageChange, lang }) => {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploadError, setUploadError] = useState('');
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
 
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
-    try {
-      const dataUrl = await fileToVehicleImageDataUrl(file);
-      onImageChange(dataUrl);
-      setUploadError('');
-    } catch (err) {
-      setUploadError(
-        err instanceof Error
-          ? err.message
-          : lang === 'ar'
-            ? 'تعذّر رفع الصورة'
-            : 'Could not upload image'
-      );
+    if (!file.type.startsWith('image/')) {
+      setUploadError(lang === 'ar' ? 'يرجى اختيار ملف صورة' : 'Please select an image file');
+      return;
     }
+    if (file.size > 8 * 1024 * 1024) {
+      setUploadError(lang === 'ar' ? 'حجم الصورة كبير — الحد 8 ميجابايت' : 'Image too large — max 8 MB');
+      return;
+    }
+    setUploadError('');
+    const reader = new FileReader();
+    reader.onload = (ev) => setCropSrc(ev.target?.result as string);
+    reader.readAsDataURL(file);
     if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const handleCropConfirm = (cropped: string) => {
+    if (cropped.length > 900_000) {
+      setUploadError(lang === 'ar' ? 'الصورة كبيرة بعد القص — جرّب منطقة أصغر' : 'Cropped image too large');
+      setCropSrc(null);
+      return;
+    }
+    onImageChange(cropped);
+    setCropSrc(null);
   };
 
   return (
     <div className="vehicle-settings-photo flex flex-wrap items-center gap-3">
       {vehicleImage ? (
-        <img
-          src={vehicleImage}
-          alt=""
-          className="w-16 h-12 object-cover rounded-lg border border-slate-200"
-        />
+        <img src={vehicleImage} alt=""
+          className="w-16 h-12 object-cover rounded-lg border border-slate-200" />
       ) : null}
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
+        <button type="button" onClick={() => fileRef.current?.click()}
           className={`px-3 py-1.5 text-sm border rounded-lg hover:bg-slate-50 ${
             uploadError ? 'border-red-400 bg-red-50' : 'border-slate-300'
-          }`}
-        >
+          }`}>
           {vehicleImage
-            ? lang === 'ar'
-              ? 'تغيير الصورة'
-              : 'Change image'
-            : lang === 'ar'
-              ? 'رفع صورة السيارة'
-              : 'Upload vehicle photo'}
+            ? lang === 'ar' ? 'تغيير الصورة' : 'Change image'
+            : lang === 'ar' ? 'رفع صورة السيارة' : 'Upload vehicle photo'}
         </button>
       </div>
-      <input
-        ref={fileRef}
-        type="file"
+      <input ref={fileRef} type="file"
         accept="image/jpeg,image/png,image/webp,image/gif"
         className="sr-only"
         onChange={(e) => void handleFile(e.target.files?.[0])}
       />
       {uploadError && (
-        <p className="w-full text-xs text-red-600" role="alert">
-          {uploadError}
-        </p>
+        <p className="w-full text-xs text-red-600" role="alert">{uploadError}</p>
       )}
       <p className="w-full text-xs app-text-muted">
         {lang === 'ar'
           ? 'تظهر على بطاقة السيارة في صفحة الأسطول فقط — ليست في شريط العنوان أعلاه.'
           : 'Shown on the garage card only — not in the header bar above.'}
       </p>
+      {cropSrc && (
+        <ImageCropModal
+          src={cropSrc}
+          onConfirm={handleCropConfirm}
+          onCancel={() => setCropSrc(null)}
+        />
+      )}
     </div>
   );
 };
@@ -1788,6 +2014,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
             driverPaymentMode={settings.driverPaymentMode ?? 'advance'}
             vehiclePaymentSettings={settings}
             paymentSetupBlocking={paymentSetupBlocking}
+            vehicleId={selectedVehicleId ?? ''}
           />
         )}
         {tab === 'insurance' && (
@@ -1814,6 +2041,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
         )}
         {tab === 'oil' && (
           <OilMaintenanceTab
+            vehicleId={selectedVehicleId ?? ''}
             oilChanges={oilChanges}
             entries={entries}
             onEditRecord={openStandaloneOilDialog}
@@ -1889,6 +2117,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
       <OilChangeDialog
         open={oilDialogOpen}
         mode="standalone"
+        vehicleId={selectedVehicleId ?? undefined}
         changeDate={
           standaloneOilEdit && standaloneOilEdit !== 'new'
             ? standaloneOilEdit.changeDate
@@ -2263,6 +2492,7 @@ const TrackingEntryCard: React.FC<{
   row: EntryComputed;
   rowNum: number;
   isRowEditing: boolean;
+  driverTooltip?: Record<string, string>;
   onOpenEdit: (row: EntryComputed) => void;
   onRequestDelete: (row: EntryComputed) => void;
   onRequestPayFull: (row: EntryComputed) => void;
@@ -2271,6 +2501,7 @@ const TrackingEntryCard: React.FC<{
   row,
   rowNum,
   isRowEditing,
+  driverTooltip = {},
   onOpenEdit,
   onRequestDelete,
   onRequestPayFull,
@@ -2332,29 +2563,30 @@ const TrackingEntryCard: React.FC<{
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
             <circle cx="12" cy="7" r="4" />
           </svg>
-          {row.driverName}
+          <span title={driverTooltip[row.driverName.trim()] ?? undefined}
+            className={driverTooltip[row.driverName.trim()] ? 'cursor-help underline decoration-dotted decoration-slate-400' : ''}>
+            {row.driverName}
+          </span>
         </div>
       )}
 
-      {/* ── Finance stats 2×2 grid ── */}
+      {/* ── Finance stats — horizontal strip ── */}
       <div className="tracking-entry-card__stats-grid">
         <div className="tracking-entry-card__stat-cell">
           <span className="tracking-entry-card__stat-label">الإيراد</span>
-          <span className="tracking-entry-card__stat-value text-green-700">{fmt(row.revenue)}</span>
+          <span className="tracking-entry-card__stat-value text-emerald-600">{fmt(row.revenue)}</span>
         </div>
         <div className="tracking-entry-card__stat-cell">
           <span className="tracking-entry-card__stat-label">المصاريف</span>
-          <span className="tracking-entry-card__stat-value text-orange-700">{fmt(row.expenses)}</span>
+          <span className="tracking-entry-card__stat-value text-orange-600">{fmt(row.expenses)}</span>
         </div>
         <div className="tracking-entry-card__stat-cell">
-          <span className="tracking-entry-card__stat-label">الصافي</span>
-          <span className={`tracking-entry-card__stat-value ${row.net >= 0 ? 'text-blue-700' : 'text-red-600'}`}>
-            {fmt(row.net)}
-          </span>
+          <span className="tracking-entry-card__stat-label">المدفوع</span>
+          <span className="tracking-entry-card__stat-value text-blue-600">{fmt(row.driverPaid)}</span>
         </div>
         <div className="tracking-entry-card__stat-cell">
           <span className="tracking-entry-card__stat-label">المتبقي</span>
-          <span className={`tracking-entry-card__stat-value ${row.remaining > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+          <span className={`tracking-entry-card__stat-value ${row.remaining > 0 ? 'text-red-600' : 'text-slate-300'}`}>
             {fmt(row.remaining)}
           </span>
         </div>
@@ -2663,6 +2895,7 @@ const TrackingEntriesTable: React.FC<{
   rows: EntryComputed[];
   rangeStart: number;
   editingId: string | null;
+  driverTooltip?: Record<string, string>;
   onOpenEdit: (row: EntryComputed) => void;
   onRequestDelete: (row: EntryComputed) => void;
   onRequestPayFull: (row: EntryComputed) => void;
@@ -2671,6 +2904,7 @@ const TrackingEntriesTable: React.FC<{
   rows,
   rangeStart,
   editingId,
+  driverTooltip = {},
   onOpenEdit,
   onRequestDelete,
   onRequestPayFull,
@@ -2721,7 +2955,12 @@ const TrackingEntriesTable: React.FC<{
                   {row.month}
                 </td>
                 <td className="py-3 px-3 font-medium text-slate-800 tracking-col-driver">
-                  {row.driverName}
+                  {driverTooltip[row.driverName?.trim()] ? (
+                    <span title={driverTooltip[row.driverName.trim()]}
+                      className="cursor-help underline decoration-dotted decoration-slate-400">
+                      {row.driverName}
+                    </span>
+                  ) : row.driverName}
                 </td>
                 <td className="py-3 px-3 tabular-nums text-green-700 font-semibold">
                   {fmt(row.revenue)}
@@ -2801,6 +3040,7 @@ interface TrackingTabProps {
     'driverFirstPaymentDate' | 'paymentCycleEpoch' | 'driverPaymentMode'
   >;
   paymentSetupBlocking?: boolean;
+  vehicleId?: string;
 }
 
 const TrackingTab: React.FC<TrackingTabProps> = ({
@@ -2827,7 +3067,34 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
   driverPaymentMode,
   vehiclePaymentSettings,
   paymentSetupBlocking = false,
+  vehicleId,
 }) => {
+  const [registeredDrivers, setRegisteredDrivers] = useState<VehicleDriver[]>([]);
+  useEffect(() => {
+    if (!vehicleId) return;
+    fetchVehicleDrivers(vehicleId)
+      .then((list) => setRegisteredDrivers(list.sort((a, b) => b.startDate.localeCompare(a.startDate))))
+      .catch(() => {/* silently ignore — falls back to free text */});
+  }, [vehicleId]);
+
+  const driverTooltip = useMemo<Record<string, string>>(() => {
+    const fmt = (iso: string) => { const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
+    const map: Record<string, string> = {};
+    const grouped: Record<string, VehicleDriver[]> = {};
+    for (const d of registeredDrivers) {
+      const key = d.name.trim();
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(d);
+    }
+    for (const [name, periods] of Object.entries(grouped)) {
+      const lines = periods
+        .sort((a, b) => a.startDate.localeCompare(b.startDate))
+        .map(p => `من ${fmt(p.startDate)} إلى ${p.endDate ? fmt(p.endDate) : 'الآن (نشط)'}`);
+      map[name] = lines.join('\n');
+    }
+    return map;
+  }, [registeredDrivers]);
+
   const editingEntry = editingId ? entries.find((e) => e.id === editingId) : undefined;
   const editingPriorCycle =
     editingEntry &&
@@ -3003,7 +3270,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
   const [showOptionalExpenses, setShowOptionalExpenses] = useState(false);
   const [showEntryFilters, setShowEntryFilters] = useState(false);
 
-  const driverOptions = useMemo(() => getUniqueDriverNames(entries), [entries]);
+  // driver filter options come from the registry (vehicle_drivers), not from entry text scanning
 
   const filteredEntries = useMemo(
     () => filterEntries(entries, filters),
@@ -3217,10 +3484,11 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
               {formError}
             </div>
           )}
-          <div className="entry-form-meta entry-form-section entry-form-section--meta grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="entry-form-meta entry-form-section entry-form-section--meta">
+            {/* Col 1: الشهر / السنة */}
             <label className="block">
-              <span className="text-xs font-medium text-slate-500">الشهر / السنة</span>
-              <div className="entry-month-year-field mt-1">
+              <span className="text-xs font-medium text-slate-500 block mb-1">الشهر / السنة</span>
+              <div className="entry-month-year-field">
                 <select
                   required
                   value={periodMonth}
@@ -3237,9 +3505,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                     );
                   })}
                 </select>
-                <span className="entry-month-year-field__sep" aria-hidden>
-                  /
-                </span>
+                <span className="entry-month-year-field__sep" aria-hidden>/</span>
                 <select
                   required
                   value={periodYear}
@@ -3254,26 +3520,57 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                   ))}
                 </select>
               </div>
-              <p className="entry-month-year-field__hint text-xs text-slate-500 mt-1 tabular-nums">
-                {form.month || formatMonthLabel(form.date)}
-              </p>
             </label>
-            <div className="block sm:col-span-2 lg:col-span-1 flex flex-col gap-2">
-              <PaymentCyclePreview
-                firstPaymentDate={vehiclePaymentSettings.driverFirstPaymentDate}
-                recordAnchor={paymentAnchor}
-                editingPriorCycle={editingPriorCycle}
-              />
-              <label className="block">
-                <span className="text-xs font-medium text-slate-500">اسم السائق</span>
+            {/* Col 2: اسم السائق */}
+            <label className="block">
+              <span className="text-xs font-medium text-slate-500 block mb-1">اسم السائق</span>
+              {registeredDrivers.length > 0 ? (
+                <select
+                  value={form.driverName}
+                  onChange={(e) => onFormChange((f) => ({ ...f, driverName: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm entry-touch-input bg-white"
+                >
+                  <option value="">— اختر السائق —</option>
+                  {Array.from(
+                    registeredDrivers.reduce((map, d) => {
+                      const key = d.name.trim();
+                      if (!map.has(key)) map.set(key, { rep: d, periods: [] });
+                      const entry = map.get(key)!;
+                      if (!d.endDate) entry.rep = d;
+                      entry.periods.push(d);
+                      return map;
+                    }, new Map<string, { rep: VehicleDriver; periods: VehicleDriver[] }>())
+                    .values()
+                  ).map(({ rep, periods }) => {
+                    const fmt = (iso: string) => { const [y,m,d2] = iso.split('-'); return `${d2}/${m}/${y}`; };
+                    const lines = periods
+                      .sort((a,b) => a.startDate.localeCompare(b.startDate))
+                      .map(p => `من ${fmt(p.startDate)} إلى ${p.endDate ? fmt(p.endDate) : 'الآن (نشط)'}`);
+                    const tooltip = lines.join('\n');
+                    return (
+                      <option key={rep.id} value={rep.name} title={tooltip}>
+                        {rep.name}{!rep.endDate ? ' ●' : ''}
+                      </option>
+                    );
+                  })}
+                </select>
+              ) : (
                 <input
                   type="text"
                   value={form.driverName}
                   onChange={(e) => onFormChange((f) => ({ ...f, driverName: e.target.value }))}
                   placeholder="اسم السائق لهذا الشهر"
-                  className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm entry-touch-input"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm entry-touch-input"
                 />
-              </label>
+              )}
+            </label>
+            {/* Col 3: مواعيد الضمان */}
+            <div>
+              <PaymentCyclePreview
+                firstPaymentDate={vehiclePaymentSettings.driverFirstPaymentDate}
+                recordAnchor={paymentAnchor}
+                editingPriorCycle={editingPriorCycle}
+              />
             </div>
           </div>
 
@@ -3378,30 +3675,58 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                   const target = installmentTargets[i];
                   const paid = formPayments[i];
                   const done = paid >= target && target > 0;
+                  const partial = paid > 0 && !done;
                   return (
-                    <div key={`${label}-${i}`} className="entry-installment-field">
-                      <span className="text-xs font-medium text-slate-600 mb-1 block">
-                        {label}
-                        <span className="text-slate-400 font-normal tabular-nums">
-                          {' '}
-                          / {fmt(target)}
+                    <div key={`${label}-${i}`}
+                      className={`entry-installment-field rounded-xl border-2 overflow-hidden transition-colors ${
+                        done
+                          ? 'border-green-300 bg-green-50'
+                          : partial
+                          ? 'border-amber-300 bg-amber-50'
+                          : 'border-slate-200 bg-white'
+                      }`}>
+                      {/* Date badge */}
+                      <div className={`px-2 py-1.5 text-center border-b ${
+                        done
+                          ? 'bg-green-100 border-green-200'
+                          : partial
+                          ? 'bg-amber-100 border-amber-200'
+                          : 'bg-slate-50 border-slate-100'
+                      }`}>
+                        <span className={`text-xs font-bold tabular-nums block leading-tight ${
+                          done ? 'text-green-800' : partial ? 'text-amber-800' : 'text-slate-600'
+                        }`}>
+                          {label}
                         </span>
-                      </span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={target}
-                        step={1}
-                        value={paid || ''}
-                        onChange={(e) => setInstallment(i, Number(e.target.value) || 0)}
-                        className={`entry-touch-input border rounded-lg px-2 py-2.5 text-base sm:text-sm bg-white tabular-nums w-full max-w-none ${
-                          done
-                            ? 'border-green-300 ring-1 ring-green-100'
-                            : 'border-slate-200'
-                        }`}
-                        placeholder={String(target)}
-                        aria-label={`${label} — الحد الأقصى ${fmt(target)} د.أ`}
-                      />
+                        <span className="text-[10px] text-slate-400 tabular-nums">
+                          المستحق: {fmt(target)} د.أ
+                        </span>
+                      </div>
+                      {/* Amount input */}
+                      <div className="px-2 py-2">
+                        <input
+                          type="number"
+                          min={0}
+                          max={target}
+                          step={1}
+                          value={paid || ''}
+                          onChange={(e) => setInstallment(i, Number(e.target.value) || 0)}
+                          className={`entry-touch-input border rounded-lg px-2 py-2 text-base sm:text-sm tabular-nums w-full text-center font-bold ${
+                            done
+                              ? 'border-green-300 bg-white text-green-700'
+                              : partial
+                              ? 'border-amber-300 bg-white text-amber-700'
+                              : 'border-slate-200 bg-white text-slate-800'
+                          }`}
+                          placeholder={String(target)}
+                          aria-label={`${label} — الحد الأقصى ${fmt(target)} د.أ`}
+                        />
+                        {done && (
+                          <div className="text-center mt-1">
+                            <span className="text-[10px] text-green-600 font-semibold">✓ مكتمل</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -3573,11 +3898,27 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                   aria-label="تصفية السائق"
                 >
                   <option value="all">كل السائقين</option>
-                  {driverOptions.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
+                  {Array.from(
+                    registeredDrivers.reduce((map, d) => {
+                      const key = d.name.trim();
+                      if (!map.has(key)) map.set(key, { rep: d, periods: [] });
+                      const entry = map.get(key)!;
+                      if (!d.endDate) entry.rep = d;
+                      entry.periods.push(d);
+                      return map;
+                    }, new Map<string, { rep: VehicleDriver; periods: VehicleDriver[] }>())
+                    .values()
+                  ).map(({ rep, periods }) => {
+                    const fmt = (iso: string) => { const [y,m,d2] = iso.split('-'); return `${d2}/${m}/${y}`; };
+                    const lines = periods
+                      .sort((a,b) => a.startDate.localeCompare(b.startDate))
+                      .map(p => `من ${fmt(p.startDate)} إلى ${p.endDate ? fmt(p.endDate) : 'الآن (نشط)'}`);
+                    return (
+                      <option key={rep.id} value={rep.name} title={lines.join('\n')}>
+                        {rep.name}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
             </div>
@@ -3619,6 +3960,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                 row={row}
                 rowNum={pagination.rangeStart + idx}
                 isRowEditing={editingId === row.id}
+                driverTooltip={driverTooltip}
                 onOpenEdit={onOpenEdit}
                 onRequestDelete={setEntryPendingDelete}
                 onRequestPayFull={setEntryPendingPayFull}
@@ -3631,6 +3973,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
             rows={pagination.items}
             rangeStart={pagination.rangeStart}
             editingId={editingId}
+            driverTooltip={driverTooltip}
             onOpenEdit={onOpenEdit}
             onRequestDelete={setEntryPendingDelete}
             onRequestPayFull={setEntryPendingPayFull}
@@ -4788,10 +5131,18 @@ const SettingsTab: React.FC<{
 }) => {
   const firstPaymentDateRef = useRef<HTMLInputElement>(null);
   const [driverDraft, setDriverDraft] = useState(settings.currentDriverName ?? '');
+  const [settingsDriverOptions, setSettingsDriverOptions] = useState<VehicleDriver[]>([]);
 
   useEffect(() => {
     setDriverDraft(settings.currentDriverName ?? '');
   }, [settings.currentDriverName]);
+
+  useEffect(() => {
+    if (!vehicleId) return;
+    fetchVehicleDrivers(vehicleId)
+      .then((list) => setSettingsDriverOptions(list.sort((a, b) => b.startDate.localeCompare(a.startDate))))
+      .catch(() => {});
+  }, [vehicleId]);
 
   useEffect(() => {
     if (!paymentSetupPrompt) return;
@@ -4886,21 +5237,41 @@ const SettingsTab: React.FC<{
         </label>
         <label className="block">
           <span className="text-sm font-medium text-slate-600">اسم السائق الحالي</span>
-          <input
-            type="text"
-            value={driverDraft}
-            onChange={(e) => setDriverDraft(e.target.value)}
-            onBlur={() => {
-              const next = driverDraft.trim();
-              const prev = (settings.currentDriverName ?? '').trim();
-              if (next !== prev) onDriverNameCommit(next);
-              else setDriverDraft(settings.currentDriverName ?? '');
-            }}
-            placeholder="يُعبَّأ تلقائياً عند دفع ضمان"
-            className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 app-surface"
-          />
+          {settingsDriverOptions.length > 0 ? (
+            <select
+              value={driverDraft}
+              onChange={(e) => {
+                const next = e.target.value;
+                setDriverDraft(next);
+                const prev = (settings.currentDriverName ?? '').trim();
+                if (next.trim() !== prev) onDriverNameCommit(next.trim());
+              }}
+              className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 app-surface bg-white"
+            >
+              <option value="">— اختر السائق —</option>
+              {settingsDriverOptions.map((d) => (
+                <option key={d.id} value={d.name}>
+                  {d.name}{!d.endDate ? ' (نشط)' : ''}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type="text"
+              value={driverDraft}
+              onChange={(e) => setDriverDraft(e.target.value)}
+              onBlur={() => {
+                const next = driverDraft.trim();
+                const prev = (settings.currentDriverName ?? '').trim();
+                if (next !== prev) onDriverNameCommit(next);
+                else setDriverDraft(settings.currentDriverName ?? '');
+              }}
+              placeholder="يُعبَّأ تلقائياً عند دفع ضمان"
+              className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 app-surface"
+            />
+          )}
           <p className="text-xs app-text-muted mt-1">
-            عند تغيير الاسم والخروج من الحقل يُطلب تأكيد وتاريخ أول دفعة جديد.
+            السائقون المتاحون من سجل السائقين — عند تغيير الاسم يُطلب تأكيد وتاريخ أول دفعة جديد.
           </p>
         </label>
         <label
@@ -4961,6 +5332,7 @@ const SettingsTab: React.FC<{
           <div className="block sm:col-span-2 border-t border-slate-200 pt-4 mt-2">
             <DriverHistoryPanel
               vehicleId={vehicleId}
+              vehicleGuarantee={settings.monthlyGuarantee || 0}
               onDriversChanged={(active) => {
                 if (active && active.name !== settings.currentDriverName) {
                   onChange({ ...settings, currentDriverName: active.name });
@@ -5011,26 +5383,6 @@ const SettingsTab: React.FC<{
       <p className="text-xs app-text-muted">
         يمكن تغيير اسم السائق لكل شهر — السجلات القديمة تحتفظ بالاسم السابق
       </p>
-    </SettingsSection>
-
-    <SettingsSection
-      title="متابعة الزيت والعداد"
-      subtitle="نوع الزيت، العيار، والتنبيهات"
-      icon="🛢️"
-      accent="orange"
-      defaultOpen={false}
-    >
-      <p className="text-sm text-slate-600 leading-relaxed">
-        سجلات الزيت الكاملة (النوع، العيار، العداد، التنبيهات) في تبويب منفصل لسهولة
-        المتابعة.
-      </p>
-      <button
-        type="button"
-        onClick={onOpenOilTab}
-        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-orange-600 text-white text-sm font-semibold rounded-xl hover:bg-orange-700 transition-colors"
-      >
-        فتح تبويب متابعة الزيت ←
-      </button>
     </SettingsSection>
 
     <SettingsSection title="رأس المال والاستثمار" subtitle="تكلفة السيارة ومدة الاستهلاك" icon="📊" accent="violet" defaultOpen={false}>
@@ -5361,6 +5713,13 @@ const DashboardTab: React.FC<{
     0,
     baseTotals.expenseByCategory.grandTotal - baseTotals.expenseByCategory.oil
   );
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportFocus, setReportFocus] = useState<DashboardReportType>('revenue');
+
+  const openReport = (focus: DashboardReportType) => {
+    setReportFocus(focus);
+    setReportOpen(true);
+  };
 
   return (
   <div className="space-y-6">
@@ -5369,16 +5728,19 @@ const DashboardTab: React.FC<{
         label="إجمالي الإيرادات"
         value={totals.totalRevenue}
         color="text-green-700"
+        icon={<svg className="w-4 h-4 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>}
         tooltipTitle="كيف يُحسب إجمالي الإيرادات؟"
         tooltipLines={[
           { label: 'مجموع عمود الإيراد في كل شهر', amount: totals.totalRevenue },
           { label: 'عدد الأشهر المسجلة', count: entries.length },
         ]}
+        onReport={() => openReport('revenue')}
       />
       <StatCard
         label="إجمالي المصاريف"
         value={totals.totalExpenses}
         color="text-orange-700"
+        icon={<svg className="w-4 h-4 text-orange-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/><line x1="5" y1="19" x2="19" y2="5" strokeWidth="1.5" strokeDasharray="3 2"/></svg>}
         tooltipTitle="كيف يُحسب إجمالي المصاريف؟"
         tooltipLines={[
           ...(monthlyExpensesExOil > 0
@@ -5401,11 +5763,13 @@ const DashboardTab: React.FC<{
             : []),
           { label: 'المجموع', amount: totals.totalExpenses, sign: '=', emphasize: true },
         ]}
+        onReport={() => openReport('expenses')}
       />
       <StatCard
         label="صافي الربح"
         value={totals.netProfit}
         color={totals.netProfit >= 0 ? 'text-blue-700' : 'text-red-700'}
+        icon={<svg className="w-4 h-4 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>}
         tooltipTitle="كيف يُحسب صافي الربح؟"
         tooltipLines={[
           {
@@ -5429,11 +5793,13 @@ const DashboardTab: React.FC<{
             : []),
           { label: 'صافي الربح', amount: totals.netProfit, sign: '=', emphasize: true },
         ]}
+        onReport={() => openReport('net')}
       />
       <StatCard
         label="مجموع المدفوع"
         value={totals.totalPaid}
         color="text-slate-800"
+        icon={<svg className="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>}
         tooltipTitle="كيف يُحسب مجموع المدفوع؟"
         tooltipLines={[
           { label: 'مجموع عمود «مدفوع» لكل شهر', amount: totals.totalPaid },
@@ -5442,17 +5808,33 @@ const DashboardTab: React.FC<{
             note: 'ليس نفس الإيراد — يخص الضمان والتحصيل',
           },
         ]}
+        onReport={() => openReport('paid')}
       />
       <StatCard
         label="مجموع المتبقي"
         value={totals.totalRemaining}
         color="text-red-600"
+        icon={<svg className="w-4 h-4 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 8 8 12 12 16"/><line x1="16" y1="12" x2="8" y2="12"/></svg>}
         tooltipTitle="كيف يُحسب المتبقي؟"
         tooltipLines={[
           { label: 'مجموع (الضمان − المدفوع) لكل شهر', amount: totals.totalRemaining },
           { label: 'أشهر غير مكتملة', count: totals.lateCount },
         ]}
+        onReport={() => openReport('remaining')}
       />
+      {reportOpen && (
+        <DashboardStatReport
+          type={reportFocus}
+          entries={entries}
+          totals={totals}
+          baseTotals={baseTotals}
+          accidentSummary={accidentSummary}
+          licenseSummary={licenseSummary}
+          monthlyExpensesExOil={monthlyExpensesExOil}
+          oilInSummary={oilInSummary}
+          onClose={() => setReportOpen(false)}
+        />
+      )}
     </div>
 
     {(accidentSummary.count > 0 || accidentSummary.totalInsuranceReceived > 0) && (
@@ -5460,18 +5842,27 @@ const DashboardTab: React.FC<{
         <h3 className="font-semibold text-slate-800">الحوادث والتأمين</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mobile-stat-grid">
           <div className="bg-orange-50 border border-orange-100 rounded-lg p-3 text-center">
+            <div className="flex justify-center mb-1">
+              <svg className="w-4 h-4 text-orange-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/><line x1="12" y1="2" x2="12" y2="9" strokeDasharray="2 2"/></svg>
+            </div>
             <p className="text-xs text-slate-600">تكاليف الحوادث</p>
             <p className="text-lg font-bold text-orange-800 tabular-nums">
               {fmt(accidentSummary.totalCost)}
             </p>
           </div>
           <div className="bg-green-50 border border-green-100 rounded-lg p-3 text-center">
+            <div className="flex justify-center mb-1">
+              <svg className="w-4 h-4 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
             <p className="text-xs text-slate-600">تأمين مستلم</p>
             <p className="text-lg font-bold text-green-800 tabular-nums">
               {fmt(accidentSummary.totalInsuranceReceived)}
             </p>
           </div>
           <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 text-center">
+            <div className="flex justify-center mb-1">
+              <svg className="w-4 h-4 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
             <p className="text-xs text-slate-600">قيد الانتظار</p>
             <p className="text-lg font-bold text-amber-800 tabular-nums">
               {fmtInt(accidentSummary.totalPending)}
@@ -5479,12 +5870,18 @@ const DashboardTab: React.FC<{
             <p className="text-[10px] text-slate-500">حادث بلا مستلم تأمين</p>
           </div>
           <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-center">
+            <div className="flex justify-center mb-1">
+              <svg className="w-4 h-4 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            </div>
             <p className="text-xs text-slate-600">مجموع المطالبة</p>
             <p className="text-lg font-bold text-indigo-800 tabular-nums">
               {fmt(accidentSummary.totalClaimAmount)}
             </p>
           </div>
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
+            <div className="flex justify-center mb-1">
+              <svg className="w-4 h-4 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+            </div>
             <p className="text-xs text-slate-600 font-semibold">صافي بعد الحوادث والتأمين</p>
             <p
               className={`text-lg font-bold tabular-nums ${
@@ -5662,13 +6059,16 @@ type StatTooltipLine = {
   note?: string;
 };
 
+// ─── StatCard ──────────────────────────────────────────────────────────────────
 const StatCard: React.FC<{
   label: string;
   value: number;
   color: string;
+  icon?: React.ReactNode;
   tooltipTitle?: string;
   tooltipLines?: StatTooltipLine[];
-}> = ({ label, value, color, tooltipTitle, tooltipLines }) => {
+  onReport?: () => void;
+}> = ({ label, value, color, icon, tooltipTitle, tooltipLines, onReport }) => {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
   const [tipPos, setTipPos] = useState<{ top: number; left: number } | null>(null);
@@ -5747,39 +6147,66 @@ const StatCard: React.FC<{
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-      <div
-        ref={triggerRef}
-        className={`stat-card-label-row${hasTooltip ? ' stat-card-label-row--has-tip' : ''}`}
-        onMouseEnter={() => {
-          if (!hasTooltip) return;
-          updateTipPos();
-          setOpen(true);
-        }}
-        onMouseLeave={() => setOpen(false)}
-        onFocus={() => {
-          if (!hasTooltip) return;
-          updateTipPos();
-          setOpen(true);
-        }}
-        onBlur={() => setOpen(false)}
-        tabIndex={hasTooltip ? 0 : undefined}
-        role={hasTooltip ? 'button' : undefined}
-        aria-label={hasTooltip ? `${label} — اعرض طريقة الحساب` : undefined}
-      >
-        <p className="text-xs text-slate-500">{label}</p>
-        {hasTooltip && (
-          <span className="stat-card-info-icon" aria-hidden>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M12 16v-4M12 8h.01" />
+      <div className="flex items-start justify-between gap-2 mb-2">
+        {icon && (
+          <div className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-slate-50 text-slate-400">
+            {icon}
+          </div>
+        )}
+        <div
+          ref={triggerRef}
+          className={`flex-1 min-w-0 flex items-center gap-1${hasTooltip ? ' stat-card-label-row--has-tip cursor-default' : ''}`}
+          onMouseEnter={() => {
+            if (!hasTooltip) return;
+            updateTipPos();
+            setOpen(true);
+          }}
+          onMouseLeave={() => setOpen(false)}
+          onFocus={() => {
+            if (!hasTooltip) return;
+            updateTipPos();
+            setOpen(true);
+          }}
+          onBlur={() => setOpen(false)}
+          tabIndex={hasTooltip ? 0 : undefined}
+          role={hasTooltip ? 'button' : undefined}
+          aria-label={hasTooltip ? `${label} — اعرض طريقة الحساب` : undefined}
+        >
+          <p className="text-xs text-slate-500 leading-tight">{label}</p>
+          {hasTooltip && (
+            <span className="stat-card-info-icon shrink-0" aria-hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4M12 8h.01" />
+              </svg>
+            </span>
+          )}
+        </div>
+        {onReport && (
+          <button
+            onClick={onReport}
+            title="عرض التقرير التفصيلي"
+            className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:bg-green-50 hover:text-green-600 transition-colors border border-transparent hover:border-green-200"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <path d="M3 9h18M3 15h18M9 3v18"/>
             </svg>
-          </span>
+          </button>
         )}
       </div>
       <p className={`text-xl font-bold tabular-nums ${color}`}>{fmt(value)} د.أ</p>
-      {hasTooltip && (
+      {onReport ? (
+        <button
+          type="button"
+          onClick={onReport}
+          className="text-[10px] text-slate-400 mt-1 hover:text-blue-600 transition-colors"
+        >
+          عرض التفاصيل
+        </button>
+      ) : hasTooltip ? (
         <p className="text-[10px] text-slate-400 mt-1">مرّر للتفاصيل</p>
-      )}
+      ) : null}
       {tooltipPanel}
     </div>
   );

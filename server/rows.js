@@ -69,6 +69,15 @@ export function rowToEntry(row) {
     paymentCycleEpoch:
       row.payment_cycle_epoch != null ? Number(row.payment_cycle_epoch) : undefined,
     monthlyGuarantee: row.monthly_guarantee != null ? Number(row.monthly_guarantee) : undefined,
+    // F5: Expense classification
+    expenseType: row.expense_type || 'normal',
+    // F1: Running balance snapshot
+    previousBalanceCarriedForward: Number(row.previous_balance_carried_forward ?? 0),
+    currentGuaranteeDue: Number(row.current_guarantee_due ?? 0),
+    totalOutstandingBalance: Number(row.total_outstanding_balance ?? 0),
+    // F4: Audit
+    createdBy: row.created_by || undefined,
+    updatedBy: row.updated_by || undefined,
   };
 }
 
@@ -112,5 +121,58 @@ export function rowToOilChange(row) {
     distanceKm: Number(row.distance_km ?? 0),
     nextOdometer: Number(row.next_odometer ?? 0),
     notes: row.notes || '',
+    driverName: row.driver_name || '',
+  };
+}
+
+export function rowToDriverProfile(row) {
+  return {
+    id: row.id,
+    vehicleId: row.vehicle_id,
+    name: row.name,
+    startDate: row.start_date,
+    endDate: row.end_date || null,
+    phoneNumber: row.phone_number || '',
+    nationalId: row.national_id || '',
+    emergencyContact: row.emergency_contact || '',
+    driverNotes: row.driver_notes || '',
+    notes: row.notes || '',
+    currentOutstandingBalance: Number(row.current_outstanding_balance ?? 0),
+    createdAt: row.created_at || '',
+    createdBy: row.created_by || undefined,
+    updatedBy: row.updated_by || undefined,
+  };
+}
+
+export function rowToDriverAssignment(row) {
+  return {
+    id: row.id,
+    vehicleId: row.vehicle_id,
+    monthlyEntryId: row.monthly_entry_id || null,
+    driverId: row.driver_id,
+    driverName: row.driver_name || undefined,
+    startDate: row.start_date,
+    endDate: row.end_date || null,
+    daysWorked: Number(row.days_worked ?? 0),
+    proratedGuarantee: Number(row.prorated_guarantee ?? 0),
+    previousBalanceCarriedForward: Number(row.previous_balance_carried_forward ?? 0),
+    paymentsReceived: Number(row.payments_received ?? 0),
+    remainingBalance: Number(row.remaining_balance ?? 0),
+    isActive: Boolean(row.is_active),
+    createdBy: row.created_by || undefined,
+    createdAt: row.created_at || '',
+  };
+}
+
+export function rowToAuditLog(row) {
+  return {
+    id: row.id,
+    entityType: row.entity_type,
+    entityId: row.entity_id,
+    actionType: row.action_type,
+    oldValue: row.old_value || null,
+    newValue: row.new_value || null,
+    performedBy: row.performed_by || null,
+    performedAt: row.performed_at || '',
   };
 }

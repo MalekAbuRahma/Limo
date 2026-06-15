@@ -88,7 +88,7 @@ export async function listVehicles(actor = null) {
       [ids]
     ),
     pool.query(
-      `SELECT * FROM oil_changes WHERE vehicle_id = ANY($1::text[]) ORDER BY change_date ASC`,
+      `SELECT * FROM oil_changes WHERE vehicle_id = ANY($1::text[]) ORDER BY change_date DESC`,
       [ids]
     ),
   ]);
@@ -230,7 +230,7 @@ export async function buildVehicleState(vehicleId) {
     [vehicleId]
   );
   const { rows: oilRows } = await pool.query(
-    `SELECT * FROM oil_changes WHERE vehicle_id = $1 ORDER BY change_date ASC`,
+    `SELECT * FROM oil_changes WHERE vehicle_id = $1 ORDER BY change_date DESC`,
     [vehicleId]
   );
 
@@ -316,8 +316,8 @@ export async function saveVehicleState(vehicleId, state) {
       await client.query(
         `INSERT INTO oil_changes (
           id, vehicle_id, entry_id, change_date, cost, oil_type, oil_grade,
-          current_odometer, distance_km, next_odometer, notes
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          current_odometer, distance_km, next_odometer, notes, driver_name
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [
           o.id,
           vehicleId,
@@ -330,6 +330,7 @@ export async function saveVehicleState(vehicleId, state) {
           o.distanceKm ?? 0,
           o.nextOdometer ?? 0,
           o.notes ?? '',
+          o.driverName ?? '',
         ]
       );
     }
@@ -409,13 +410,13 @@ export async function listVehicleDrivers(vehicleId) {
   return rows.map(rowToVehicleDriver);
 }
 
-export async function addVehicleDriver(vehicleId, { name, startDate, notes = '' }) {
+export async function addVehicleDriver(vehicleId, { name, startDate, endDate = null, notes = '' }) {
   const pool = getPool();
   const id = `drv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   await pool.query(
-    `INSERT INTO vehicle_drivers (id, vehicle_id, name, start_date, notes)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [id, vehicleId, String(name).trim(), String(startDate).trim(), String(notes)]
+    `INSERT INTO vehicle_drivers (id, vehicle_id, name, start_date, end_date, notes)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [id, vehicleId, String(name).trim(), String(startDate).trim(), endDate ? String(endDate).trim() : null, String(notes)]
   );
   const { rows } = await pool.query(`SELECT * FROM vehicle_drivers WHERE id = $1`, [id]);
   return rowToVehicleDriver(rows[0]);
@@ -432,6 +433,26 @@ export async function stopVehicleDriver(driverId, endDate) {
     err.code = 'NOT_FOUND';
     throw err;
   }
+  return rowToVehicleDriver(rows[0]);
+}
+
+export async function updateVehicleDriver(driverId, { name, startDate, endDate, monthlyGuarantee, notes }) {
+  const pool = getPool();
+  const fields = [];
+  const values = [];
+  let idx = 1;
+  if (name !== undefined)            { fields.push(`name = $${idx++}`);              values.push(String(name).trim()); }
+  if (startDate !== undefined)       { fields.push(`start_date = $${idx++}`);        values.push(String(startDate).trim()); }
+  if (endDate !== undefined)         { fields.push(`end_date = $${idx++}`);          values.push(endDate === null ? null : String(endDate).trim()); }
+  if (monthlyGuarantee !== undefined){ fields.push(`monthly_guarantee = $${idx++}`); values.push(Number(monthlyGuarantee) || 0); }
+  if (notes !== undefined)           { fields.push(`notes = $${idx++}`);             values.push(String(notes)); }
+  if (!fields.length) throw Object.assign(new Error('Nothing to update'), { code: 'NO_CHANGES' });
+  values.push(driverId);
+  const { rows } = await pool.query(
+    `UPDATE vehicle_drivers SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
+    values
+  );
+  if (!rows.length) throw Object.assign(new Error('Driver not found'), { code: 'NOT_FOUND' });
   return rowToVehicleDriver(rows[0]);
 }
 
@@ -454,6 +475,7 @@ function rowToVehicleDriver(row) {
     startDate: row.start_date,
     endDate: row.end_date ?? null,
     notes: row.notes ?? '',
+    monthlyGuarantee: Number(row.monthly_guarantee) || 0,
     createdAt: row.created_at,
   };
 }

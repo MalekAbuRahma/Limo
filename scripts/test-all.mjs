@@ -16,6 +16,7 @@ const steps = [
   ['Integration', ['npx', 'tsx', 'scripts/test-integration.mjs']],
   ['Fleet / multi-car', ['npx', 'tsx', 'scripts/test-fleet.mjs']],
   ['Oil change tracking', ['npx', 'tsx', 'scripts/test-oil-change.mjs']],
+  ['Driver ledger (F1/F2/F9)', ['npx', 'tsx', 'scripts/test-driver-ledger.mjs']],
   ['Production build', ['node', 'node_modules/vite/bin/vite.js', 'build']],
 ];
 

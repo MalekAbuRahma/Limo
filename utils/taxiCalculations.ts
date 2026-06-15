@@ -261,14 +261,27 @@ export function computeExpenseTotals(
 }
 
 export interface DashboardTotals {
+  /**
+   * Passenger-reported revenue — for vehicle performance display only.
+   * Do NOT use this for profitability or ROI.
+   */
   totalRevenue: number;
   totalExpenses: number;
+  /**
+   * Owner net profit = owner income (driver payments received) - expenses.
+   * F9: This replaces the old totalRevenue - totalExpenses formula.
+   */
   netProfit: number;
+  /** Owner income = sum of actual driver payments received. Used for profitability. */
+  totalOwnerIncome: number;
   totalPaid: number;
   totalRemaining: number;
   lateCount: number;
   paidCount: number;
   expenseByCategory: ExpenseTotalsByCategory;
+  /** F5: Expenses split by Normal vs Major classification */
+  totalNormalExpenses: number;
+  totalMajorExpenses: number;
 }
 
 export function computeDashboard(
@@ -286,15 +299,34 @@ export function computeDashboard(
   const totalExpenses =
     computed.reduce((s, e) => s + e.expenses, 0) + orphanOil;
   const totalRevenue = computed.reduce((s, e) => s + e.revenue, 0);
+  // F9: Owner income is actual driver payments received, not passenger revenue.
+  const totalOwnerIncome = computed.reduce((s, e) => s + e.driverPaid, 0);
+  // F5: Split expenses by classification
+  const totalNormalExpenses = entries
+    .filter((e) => !e.expenseType || e.expenseType === 'normal')
+    .reduce((s, e) => {
+      const c = computed.find((c) => c.id === e.id);
+      return s + (c?.expenses ?? 0);
+    }, 0);
+  const totalMajorExpenses = entries
+    .filter((e) => e.expenseType === 'major')
+    .reduce((s, e) => {
+      const c = computed.find((c) => c.id === e.id);
+      return s + (c?.expenses ?? 0);
+    }, 0);
   return {
     totalRevenue,
     totalExpenses,
-    netProfit: totalRevenue - totalExpenses,
+    // F9: profitability uses owner income (driver payments), not passenger revenue
+    netProfit: totalOwnerIncome - totalExpenses,
+    totalOwnerIncome,
     totalPaid: computed.reduce((s, e) => s + e.driverPaid, 0),
     totalRemaining: computed.reduce((s, e) => s + e.remaining, 0),
     lateCount: computed.filter((e) => e.status !== 'مكتمل').length,
     paidCount: computed.filter((e) => e.status === 'مكتمل').length,
     expenseByCategory,
+    totalNormalExpenses,
+    totalMajorExpenses,
   };
 }
 
@@ -351,12 +383,13 @@ export function computeRoiAnalysis(
     (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
   );
   const monthsRecorded = sorted.length;
-  const totalNet = sorted.reduce((s, e) => s + e.net, 0);
+  // F9: ROI uses owner income (driverPaid) - expenses, not passenger revenue
+  const totalNet = sorted.reduce((s, e) => s + (e.driverPaid - e.expenses), 0);
   const avgMonthlyNet =
     monthsRecorded > 0 ? totalNet / monthsRecorded : 0;
 
   let cumulativeActual = 0;
-  for (const e of sorted) cumulativeActual += e.net;
+  for (const e of sorted) cumulativeActual += e.driverPaid - e.expenses;
 
   const breakEvenMonths =
     avgMonthlyNet > 0 ? Math.ceil(vehicleCost / avgMonthlyNet) : Infinity;
@@ -381,7 +414,8 @@ export function computeRoiAnalysis(
   for (let i = 1; i <= lifeMonths; i++) {
     const isProjected = i > monthsRecorded;
     if (i <= monthsRecorded) {
-      cumulative += sorted[i - 1].net;
+      // F9: accumulate owner income - expenses, not passenger revenue - expenses
+      cumulative += sorted[i - 1].driverPaid - sorted[i - 1].expenses;
       chartData.push({
         monthIndex: i,
         label: sorted[i - 1].month,

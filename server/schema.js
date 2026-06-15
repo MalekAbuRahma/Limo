@@ -159,6 +159,110 @@ export async function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_vehicle_drivers_vehicle ON vehicle_drivers(vehicle_id);
   `);
 
+  // Add monthly_guarantee per driver (defaults to 0 = inherit vehicle guarantee)
+  await pool.query(`ALTER TABLE vehicle_drivers ADD COLUMN IF NOT EXISTS monthly_guarantee DOUBLE PRECISION NOT NULL DEFAULT 0;`);
+
+  // Add driver name to oil changes for per-driver mileage tracking
+  await pool.query(`ALTER TABLE oil_changes ADD COLUMN IF NOT EXISTS driver_name TEXT NOT NULL DEFAULT '';`);
+
+  // F1: Extend vehicle_drivers with driver profile fields and running balance
+  await pool.query(`ALTER TABLE vehicle_drivers ADD COLUMN IF NOT EXISTS phone_number TEXT NOT NULL DEFAULT '';`);
+  await pool.query(`ALTER TABLE vehicle_drivers ADD COLUMN IF NOT EXISTS national_id TEXT NOT NULL DEFAULT '';`);
+  await pool.query(`ALTER TABLE vehicle_drivers ADD COLUMN IF NOT EXISTS emergency_contact TEXT NOT NULL DEFAULT '';`);
+  await pool.query(`ALTER TABLE vehicle_drivers ADD COLUMN IF NOT EXISTS driver_notes TEXT NOT NULL DEFAULT '';`);
+  await pool.query(`ALTER TABLE vehicle_drivers ADD COLUMN IF NOT EXISTS current_outstanding_balance DOUBLE PRECISION NOT NULL DEFAULT 0;`);
+  await pool.query(`ALTER TABLE vehicle_drivers ADD COLUMN IF NOT EXISTS created_by TEXT;`);
+  await pool.query(`ALTER TABLE vehicle_drivers ADD COLUMN IF NOT EXISTS updated_by TEXT;`);
+  await pool.query(`ALTER TABLE vehicle_drivers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();`);
+
+  // F7: Unique partial index — only one active (end_date IS NULL) driver per vehicle.
+  // Before creating the index, close any duplicate active rows (keep the most recently started one).
+  await pool.query(`
+    UPDATE vehicle_drivers
+    SET end_date = NOW()
+    WHERE end_date IS NULL
+      AND id NOT IN (
+        SELECT DISTINCT ON (vehicle_id) id
+        FROM vehicle_drivers
+        WHERE end_date IS NULL
+        ORDER BY vehicle_id, start_date DESC NULLS LAST
+      );
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicle_drivers_one_active
+    ON vehicle_drivers (vehicle_id)
+    WHERE end_date IS NULL;
+  `);
+
+  // F2: Driver assignment entries — supports multiple drivers per calendar month
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS driver_assignment_entries (
+      id TEXT PRIMARY KEY,
+      vehicle_id TEXT NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+      monthly_entry_id TEXT REFERENCES monthly_entries(id) ON DELETE SET NULL,
+      driver_id TEXT NOT NULL REFERENCES vehicle_drivers(id) ON DELETE CASCADE,
+      start_date TEXT NOT NULL,
+      end_date TEXT,
+      days_worked INTEGER NOT NULL DEFAULT 0,
+      prorated_guarantee DOUBLE PRECISION NOT NULL DEFAULT 0,
+      previous_balance_carried_forward DOUBLE PRECISION NOT NULL DEFAULT 0,
+      payments_received DOUBLE PRECISION NOT NULL DEFAULT 0,
+      remaining_balance DOUBLE PRECISION NOT NULL DEFAULT 0,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_by TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_driver_assignments_vehicle ON driver_assignment_entries(vehicle_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_driver_assignments_driver ON driver_assignment_entries(driver_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_driver_assignments_entry ON driver_assignment_entries(monthly_entry_id);`);
+
+  // F4: Audit log
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id TEXT PRIMARY KEY,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      action_type TEXT NOT NULL,
+      old_value JSONB,
+      new_value JSONB,
+      performed_by TEXT,
+      performed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_performed_at ON audit_log(performed_at);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_performed_by ON audit_log(performed_by);`);
+
+  // F4: Audit columns on major entities
+  await pool.query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();`);
+  await pool.query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS created_by TEXT;`);
+  await pool.query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS updated_by TEXT;`);
+
+  await pool.query(`ALTER TABLE monthly_entries ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();`);
+  await pool.query(`ALTER TABLE monthly_entries ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();`);
+  await pool.query(`ALTER TABLE monthly_entries ADD COLUMN IF NOT EXISTS created_by TEXT;`);
+  await pool.query(`ALTER TABLE monthly_entries ADD COLUMN IF NOT EXISTS updated_by TEXT;`);
+
+  await pool.query(`ALTER TABLE accidents ADD COLUMN IF NOT EXISTS created_by TEXT;`);
+  await pool.query(`ALTER TABLE accidents ADD COLUMN IF NOT EXISTS updated_by TEXT;`);
+  await pool.query(`ALTER TABLE accidents ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();`);
+  await pool.query(`ALTER TABLE accidents ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();`);
+
+  await pool.query(`ALTER TABLE annual_licenses ADD COLUMN IF NOT EXISTS created_by TEXT;`);
+  await pool.query(`ALTER TABLE annual_licenses ADD COLUMN IF NOT EXISTS updated_by TEXT;`);
+  await pool.query(`ALTER TABLE annual_licenses ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();`);
+  await pool.query(`ALTER TABLE annual_licenses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();`);
+
+  // F5: Expense classification on monthly entries
+  await pool.query(`ALTER TABLE monthly_entries ADD COLUMN IF NOT EXISTS expense_type TEXT NOT NULL DEFAULT 'normal';`);
+
+  // F1: Running balance columns on monthly_entries
+  await pool.query(`ALTER TABLE monthly_entries ADD COLUMN IF NOT EXISTS previous_balance_carried_forward DOUBLE PRECISION NOT NULL DEFAULT 0;`);
+  await pool.query(`ALTER TABLE monthly_entries ADD COLUMN IF NOT EXISTS current_guarantee_due DOUBLE PRECISION NOT NULL DEFAULT 0;`);
+  await pool.query(`ALTER TABLE monthly_entries ADD COLUMN IF NOT EXISTS total_outstanding_balance DOUBLE PRECISION NOT NULL DEFAULT 0;`)
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,

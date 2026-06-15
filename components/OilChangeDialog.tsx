@@ -8,6 +8,7 @@ import {
   OIL_DAYS_ALERT_THRESHOLD,
   formatNextOdometerFromFields,
 } from '../utils/taxiOilChange';
+import { fetchVehicleDrivers, type VehicleDriver } from '../utils/taxiApi';
 
 export type OilDialogMode = 'entry' | 'standalone';
 
@@ -17,6 +18,7 @@ interface OilChangeDialogProps {
   changeDate: string;
   oilCost: number;
   driverName: string;
+  vehicleId?: string;
   existing?: OilChangeRecord | null;
   previousRecords: OilChangeRecord[];
   onCancel: () => void;
@@ -29,6 +31,7 @@ const OilChangeDialog: React.FC<OilChangeDialogProps> = ({
   changeDate,
   oilCost,
   driverName,
+  vehicleId,
   existing,
   previousRecords,
   onCancel,
@@ -44,7 +47,17 @@ const OilChangeDialog: React.FC<OilChangeDialogProps> = ({
   const [distanceKm, setDistanceKm] = useState('');
   const [nextOdometer, setNextOdometer] = useState('');
   const [notes, setNotes] = useState('');
+  const [editDriverName, setEditDriverName] = useState('');
+  const [registeredDrivers, setRegisteredDrivers] = useState<VehicleDriver[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  // Load drivers for the vehicle
+  useEffect(() => {
+    if (!vehicleId) return;
+    fetchVehicleDrivers(vehicleId).then((list) => {
+      setRegisteredDrivers(list.sort((a, b) => b.startDate.localeCompare(a.startDate)));
+    }).catch(() => {});
+  }, [vehicleId]);
 
   const resolveSelect = (
     value: string,
@@ -83,11 +96,13 @@ const OilChangeDialog: React.FC<OilChangeDialogProps> = ({
       setDistanceKm(String(existing.distanceKm || ''));
       setNextOdometer(String(existing.nextOdometer || ''));
       setNotes(existing.notes ?? '');
+      setEditDriverName(existing.driverName ?? driverName ?? '');
     } else {
       setCost(String(oilCost || ''));
       setOilType('');
       setOilGrade('');
       setOilGradeCustom('');
+      setEditDriverName(driverName ?? '');
       const last = previousRecords[0];
       const defaultDist = OIL_DEFAULT_DISTANCE_KM;
       if (last) {
@@ -162,6 +177,7 @@ const OilChangeDialog: React.FC<OilChangeDialogProps> = ({
       distanceKm: Math.round(dist),
       nextOdometer: Math.round(next),
       notes: notes.trim(),
+      driverName: editDriverName.trim() || driverName || '',
     };
 
     onSave(record);
@@ -199,10 +215,33 @@ const OilChangeDialog: React.FC<OilChangeDialogProps> = ({
             {isEntry ? 'تغيير زيت — بيانات العداد' : existing ? 'تعديل سجل الزيت' : 'تسجيل تغيير زيت'}
           </h2>
           <p className="text-sm text-orange-800 mt-2 leading-relaxed">
-            سجّل نوع الزيت والعيار والتكلفة مع قراءات العداد — تُحسب تلقائياً في مصاريف الشهر
-            والأرباح والملخص
-            {driverName ? ` (${driverName})` : ''}.
+            سجّل نوع الزيت والعيار والتكلفة مع قراءات العداد — تُحسب تلقائياً في مصاريف الشهر والأرباح والملخص.
           </p>
+          <div className="mt-3">
+            <label className="block text-xs font-semibold text-orange-800 mb-1">السائق</label>
+            {registeredDrivers.length > 0 ? (
+              <select
+                value={editDriverName}
+                onChange={(e) => setEditDriverName(e.target.value)}
+                className="w-full border border-orange-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+              >
+                <option value="">— بدون سائق —</option>
+                {Array.from(new Map(registeredDrivers.map(d => [d.name.trim(), d])).values()).map(d => (
+                  <option key={d.id} value={d.name}>
+                    {d.name}{!d.endDate ? ' ●' : ''}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={editDriverName}
+                onChange={(e) => setEditDriverName(e.target.value)}
+                placeholder="اسم السائق (اختياري)"
+                className="w-full border border-orange-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+              />
+            )}
+          </div>
         </AppModalHeader>
 
         <AppModalBody className="space-y-4">

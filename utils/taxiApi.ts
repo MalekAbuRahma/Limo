@@ -1,4 +1,12 @@
-import { FleetData, TaxiAppState } from '../taxiTypes';
+import {
+  FleetData,
+  TaxiAppState,
+  DriverProfile,
+  DriverAssignmentEntry,
+  DriverSettlement,
+  FleetPerformanceRanking,
+  AuditLogEntry,
+} from '../taxiTypes';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
@@ -166,6 +174,7 @@ export interface VehicleDriver {
   startDate: string;
   endDate: string | null;
   notes: string;
+  monthlyGuarantee: number;
   createdAt?: string;
 }
 
@@ -185,7 +194,7 @@ export async function fetchVehicleDrivers(vehicleId: string): Promise<VehicleDri
 
 export async function addVehicleDriverApi(
   vehicleId: string,
-  payload: { name: string; startDate: string; notes?: string }
+  payload: { name: string; startDate: string; endDate?: string | null; notes?: string }
 ): Promise<VehicleDriver | null> {
   try {
     const res = await fetch(
@@ -234,6 +243,28 @@ export async function stopVehicleDriverApi(
   }
 }
 
+export async function updateVehicleDriverApi(
+  vehicleId: string,
+  driverId: string,
+  payload: { name?: string; startDate?: string; endDate?: string | null; monthlyGuarantee?: number; notes?: string }
+): Promise<VehicleDriver | null> {
+  const res = await fetch(
+    `${API_BASE}/api/vehicles/${encodeURIComponent(vehicleId)}/drivers/${encodeURIComponent(driverId)}`,
+    {
+      method: 'PATCH',
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(8000),
+    }
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(body.error ?? 'فشل تعديل السائق');
+  }
+  const data = await res.json() as { driver: VehicleDriver };
+  return data.driver;
+}
+
 export async function deleteVehicleDriverApi(
   vehicleId: string,
   driverId: string
@@ -250,6 +281,185 @@ export async function deleteVehicleDriverApi(
     const body = await res.json().catch(() => ({})) as { error?: string };
     throw new Error(body.error ?? 'فشل حذف السائق');
   }
+}
+
+// ─── F1: Driver Running Balance ───────────────────────────────────────────────
+
+export async function fetchDriverBalance(
+  vehicleId: string,
+  driverId: string
+): Promise<{ currentOutstandingBalance: number; ledger: unknown[] } | null> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/vehicles/${encodeURIComponent(vehicleId)}/drivers/${encodeURIComponent(driverId)}/balance`,
+      { headers: apiHeaders(), signal: AbortSignal.timeout(8000) }
+    );
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+// ─── F2: Driver Withdrawal ────────────────────────────────────────────────────
+
+export async function withdrawDriverApi(
+  vehicleId: string,
+  driverId: string,
+  endDate: string,
+  monthlyGuarantee: number
+): Promise<{
+  daysWorked: number;
+  proratedGuarantee: number;
+  remainingBalance: number;
+  suggestedNextAnchorDate: string;
+}> {
+  const res = await fetch(
+    `${API_BASE}/api/vehicles/${encodeURIComponent(vehicleId)}/drivers/${encodeURIComponent(driverId)}/withdraw`,
+    {
+      method: 'POST',
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ endDate, monthlyGuarantee }),
+      signal: AbortSignal.timeout(10000),
+    }
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(body.error ?? 'فشل إنهاء خدمة السائق');
+  }
+  return res.json();
+}
+
+// ─── F3: Driver Replacement ───────────────────────────────────────────────────
+
+export async function replaceDriverApi(
+  vehicleId: string,
+  params: {
+    currentDriverId?: string | null;
+    currentDriverEndDate?: string | null;
+    newDriverName: string;
+    newDriverStartDate: string;
+    monthlyGuarantee: number;
+  }
+): Promise<{
+  newDriverId: string;
+  newDriverName: string;
+  newDriverStartDate: string;
+  suggestedAnchor: string;
+}> {
+  const res = await fetch(
+    `${API_BASE}/api/vehicles/${encodeURIComponent(vehicleId)}/drivers/replace`,
+    {
+      method: 'POST',
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(params),
+      signal: AbortSignal.timeout(10000),
+    }
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(body.error ?? 'فشل تبديل السائق');
+  }
+  return res.json();
+}
+
+// ─── F6: Driver Settlement ────────────────────────────────────────────────────
+
+export async function fetchDriverSettlement(
+  vehicleId: string,
+  driverId: string
+): Promise<DriverSettlement | null> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/vehicles/${encodeURIComponent(vehicleId)}/drivers/${encodeURIComponent(driverId)}/settlement`,
+      { headers: apiHeaders(), signal: AbortSignal.timeout(8000) }
+    );
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+// ─── F4: Audit Log ────────────────────────────────────────────────────────────
+
+export async function fetchAuditLog(params: {
+  entityType?: string;
+  entityId?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<AuditLogEntry[]> {
+  const query = new URLSearchParams();
+  if (params.entityType) query.set('entityType', params.entityType);
+  if (params.entityId) query.set('entityId', params.entityId);
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.offset) query.set('offset', String(params.offset));
+  try {
+    const res = await fetch(`${API_BASE}/api/audit-log?${query}`, {
+      headers: apiHeaders(),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
+    const data = await res.json() as { entries: AuditLogEntry[] };
+    return data.entries ?? [];
+  } catch {
+    return [];
+  }
+}
+
+// ─── F7: Active Driver Check ──────────────────────────────────────────────────
+
+export async function fetchActiveDriver(vehicleId: string): Promise<DriverProfile | null> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/vehicles/${encodeURIComponent(vehicleId)}/drivers/active`,
+      { headers: apiHeaders(), signal: AbortSignal.timeout(5000) }
+    );
+    if (!res.ok) return null;
+    const data = await res.json() as { driver: DriverProfile | null };
+    return data.driver;
+  } catch {
+    return null;
+  }
+}
+
+// ─── F8: Fleet Performance Ranking ───────────────────────────────────────────
+
+export async function fetchFleetPerformanceRanking(): Promise<FleetPerformanceRanking | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/fleet/performance-ranking`, {
+      headers: apiHeaders(),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+// ─── Driver Profile Update ────────────────────────────────────────────────────
+
+export async function updateDriverProfileApi(
+  vehicleId: string,
+  driverId: string,
+  updates: Partial<Pick<DriverProfile, 'phoneNumber' | 'nationalId' | 'emergencyContact' | 'driverNotes' | 'notes'>>
+): Promise<DriverProfile> {
+  const res = await fetch(
+    `${API_BASE}/api/vehicles/${encodeURIComponent(vehicleId)}/drivers/${encodeURIComponent(driverId)}/profile`,
+    {
+      method: 'PATCH',
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(updates),
+      signal: AbortSignal.timeout(8000),
+    }
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(body.error ?? 'فشل تحديث بيانات السائق');
+  }
+  const data = await res.json() as { driver: DriverProfile };
+  return data.driver;
 }
 
 /** @deprecated */
