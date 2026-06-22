@@ -38,6 +38,11 @@ function tableExists(db, name) {
 }
 
 function mapEntry(row) {
+  // Carry the 3-installment breakdown if the legacy DB has it; otherwise let
+  // the downstream logic derive it from driver_paid.
+  const slotPayments = [row.driver_payment_1, row.driver_payment_2, row.driver_payment_3];
+  const hasSlotPayments = slotPayments.some((p) => p != null && Number(p) > 0);
+
   return {
     id: row.id,
     date: row.date,
@@ -56,7 +61,12 @@ function mapEntry(row) {
     },
     notes: row.notes || '',
     driverPaid: row.driver_paid ?? 0,
+    driverPayments: hasSlotPayments ? slotPayments.map((p) => Number(p) || 0) : undefined,
+    paymentComplete: row.payment_complete != null ? Boolean(row.payment_complete) : undefined,
     monthlyGuarantee: row.monthly_guarantee ?? undefined,
+    workStartDate: row.work_start_date || undefined,
+    paymentAnchorDate: row.payment_anchor_date || undefined,
+    paymentCycleEpoch: row.payment_cycle_epoch ?? undefined,
   };
 }
 

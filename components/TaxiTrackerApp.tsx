@@ -673,6 +673,9 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
   const [standaloneOilEdit, setStandaloneOilEdit] = useState<OilChangeRecord | 'new' | null>(
     null
   );
+  const [oilHighlight, setOilHighlight] = useState<{ entryId: string; key: number } | null>(
+    null
+  );
   const [toast, setToast] = useState<{ message: string; tone: AppToastTone } | null>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [importBackupConfirm, setImportBackupConfirm] = useState<{
@@ -1401,6 +1404,11 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
     setOilDialogOpen(true);
   };
 
+  const navigateToOilRecord = useCallback((entryId: string) => {
+    setOilHighlight({ entryId, key: Date.now() });
+    setTab('oil');
+  }, []);
+
   const handleDeleteOilRecord = async (id: string) => {
     if (!selectedVehicleId) return;
     const rec = oilChanges.find((o) => o.id === id);
@@ -2006,6 +2014,7 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
             onFormChange={setForm}
             onMonthPickerChange={handleMonthPickerChange}
             onOpenOilTab={() => setTab('oil')}
+            onNavigateToOilRecord={navigateToOilRecord}
             oilChanges={oilChanges}
             lateCount={totals.lateCount}
             paidCount={totals.paidCount}
@@ -2047,6 +2056,8 @@ const TaxiTrackerApp: React.FC<TaxiTrackerAppProps> = ({
             onEditRecord={openStandaloneOilDialog}
             onAddRecord={() => openStandaloneOilDialog()}
             onDeleteRecord={handleDeleteOilRecord}
+            highlightEntryId={oilHighlight?.entryId ?? null}
+            highlightKey={oilHighlight?.key ?? 0}
           />
         )}
         {tab === 'settings' && (
@@ -2497,6 +2508,7 @@ const TrackingEntryCard: React.FC<{
   onRequestDelete: (row: EntryComputed) => void;
   onRequestPayFull: (row: EntryComputed) => void;
   onSetPaymentComplete: (id: string, complete: boolean) => void;
+  onNavigateToOilRecord?: (entryId: string) => void;
 }> = ({
   row,
   rowNum,
@@ -2506,6 +2518,7 @@ const TrackingEntryCard: React.FC<{
   onRequestDelete,
   onRequestPayFull,
   onSetPaymentComplete,
+  onNavigateToOilRecord,
 }) => {
   const cardTone = isRowEditing
     ? 'tracking-entry-card--editing'
@@ -2637,7 +2650,12 @@ const TrackingEntryCard: React.FC<{
       {/* ── Expense details + notes ── */}
       {(REPORT_EXPENSE_KEYS.some((k) => row.expenseDetails[k] > 0) || row.notes) && (
         <div className="tracking-entry-card__extras">
-          <ExpenseDetailsCell row={row} />
+          <ExpenseDetailsCell
+            row={row}
+            onNavigateToOil={
+              onNavigateToOilRecord ? () => onNavigateToOilRecord(row.id) : undefined
+            }
+          />
         </div>
       )}
 
@@ -2662,22 +2680,47 @@ const TrackingEntryCard: React.FC<{
   );
 };
 
-const ExpenseDetailsCell: React.FC<{ row: EntryComputed }> = ({ row }) => {
+const ExpenseDetailsCell: React.FC<{
+  row: EntryComputed;
+  onNavigateToOil?: () => void;
+}> = ({ row, onNavigateToOil }) => {
   const tags = REPORT_EXPENSE_KEYS.filter((k) => row.expenseDetails[k] > 0);
 
   return (
     <div className="space-y-1.5 min-w-[140px] max-w-[220px]">
       {tags.length > 0 ? (
         <div className="flex flex-wrap gap-1">
-          {tags.map((k) => (
-            <span
-              key={k}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-xs leading-snug"
-            >
-              <span className="text-slate-500">{EXPENSE_FIELD_LABELS[k]}</span>
-              <span className="font-semibold tabular-nums">{fmt(row.expenseDetails[k])}</span>
-            </span>
-          ))}
+          {tags.map((k) => {
+            if (k === 'oil' && onNavigateToOil) {
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onNavigateToOil();
+                  }}
+                  title="عرض السجل في تبويب متابعة الزيت"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-orange-100 text-orange-800 text-xs leading-snug hover:bg-orange-200 transition-colors cursor-pointer ring-1 ring-orange-200"
+                >
+                  <span>{EXPENSE_FIELD_LABELS[k]}</span>
+                  <span className="font-semibold tabular-nums">{fmt(row.expenseDetails[k])}</span>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden>
+                    <path d="M7 17L17 7M17 7H8M17 7v9" />
+                  </svg>
+                </button>
+              );
+            }
+            return (
+              <span
+                key={k}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-xs leading-snug"
+              >
+                <span className="text-slate-500">{EXPENSE_FIELD_LABELS[k]}</span>
+                <span className="font-semibold tabular-nums">{fmt(row.expenseDetails[k])}</span>
+              </span>
+            );
+          })}
         </div>
       ) : (
         <span className="text-slate-400">—</span>
@@ -3029,6 +3072,7 @@ interface TrackingTabProps {
   onFormChange: React.Dispatch<React.SetStateAction<Omit<MonthlyEntry, 'id'>>>;
   onMonthPickerChange: (ym: string) => void;
   onOpenOilTab: () => void;
+  onNavigateToOilRecord?: (entryId: string) => void;
   oilChanges: OilChangeRecord[];
   lateCount: number;
   paidCount: number;
@@ -3059,6 +3103,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
   onFormChange,
   onMonthPickerChange,
   onOpenOilTab,
+  onNavigateToOilRecord,
   oilChanges,
   lateCount,
   paidCount,
@@ -3965,6 +4010,7 @@ const TrackingTab: React.FC<TrackingTabProps> = ({
                 onRequestDelete={setEntryPendingDelete}
                 onRequestPayFull={setEntryPendingPayFull}
                 onSetPaymentComplete={onSetPaymentComplete}
+                onNavigateToOilRecord={onNavigateToOilRecord}
               />
             ))}
           </div>

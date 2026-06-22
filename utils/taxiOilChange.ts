@@ -43,6 +43,7 @@ export function migrateOilChange(raw: Partial<OilChangeRecord> & { id: string })
     distanceKm: Math.max(0, Math.round(raw.distanceKm ?? 0)),
     nextOdometer: Math.max(0, Math.round(raw.nextOdometer ?? 0)),
     notes: raw.notes ?? '',
+    driverName: raw.driverName?.trim() || '',
   };
 }
 

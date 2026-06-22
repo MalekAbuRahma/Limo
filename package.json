@@ -13,6 +13,7 @@
     "user:add": "npx tsx scripts/add-user.mjs",
     "user:hash": "npx tsx scripts/hash-password.mjs",
     "db:migrate": "npx tsx scripts/migrate-sqlite-to-pg.mjs",
+    "db:backfill-guarantee": "node scripts/backfill-historical-guarantee.mjs",
     "db:push": "node deploy/push-data.mjs",
     "users:push": "node deploy/push-users.mjs",
     "deploy": "node deploy/deploy-remote.mjs",

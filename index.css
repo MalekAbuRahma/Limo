@@ -2038,6 +2038,29 @@ body {
   background: #f8fafc;
 }
 
+#taxi-app .oil-table tbody tr.oil-row--highlight {
+  animation: oilRowHighlight 2.8s ease-out;
+}
+
+#taxi-app .oil-table tbody tr.oil-row--highlight td {
+  box-shadow: inset 0 0 0 0 transparent;
+}
+
+@keyframes oilRowHighlight {
+  0% {
+    background-color: #fdba74;
+    box-shadow: inset 0 0 0 2px #f97316;
+  }
+  60% {
+    background-color: #ffedd5;
+    box-shadow: inset 0 0 0 2px #fdba74;
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+}
+
 #taxi-app .oil-row-btn {
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;

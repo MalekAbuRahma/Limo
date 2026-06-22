@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ConfirmDialog from './ConfirmDialog';
 import type { MonthlyEntry, OilChangeRecord } from '../taxiTypes';
 import { formatInteger, formatNumber } from '../utils/taxiFormat';
@@ -38,6 +38,10 @@ interface OilMaintenanceTabProps {
   onEditRecord: (record: OilChangeRecord) => void;
   onAddRecord: () => void;
   onDeleteRecord: (id: string) => void;
+  /** When set, scroll to and highlight the oil record(s) for this monthly entry */
+  highlightEntryId?: string | null;
+  /** Changes on each navigation request to re-trigger highlight even for the same entry */
+  highlightKey?: number;
 }
 
 const OilMaintenanceTab: React.FC<OilMaintenanceTabProps> = ({
@@ -47,14 +51,48 @@ const OilMaintenanceTab: React.FC<OilMaintenanceTabProps> = ({
   onEditRecord,
   onAddRecord,
   onDeleteRecord,
+  highlightEntryId = null,
+  highlightKey = 0,
 }) => {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [drivers, setDrivers] = useState<VehicleDriver[]>([]);
+  const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
+  const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
 
   useEffect(() => {
     if (!vehicleId) return;
     fetchVehicleDrivers(vehicleId).then(setDrivers).catch(() => {});
   }, [vehicleId]);
+
+  useEffect(() => {
+    if (!highlightEntryId) return;
+    const targetEntry = entries.find((e) => e.id === highlightEntryId);
+    const targetYm = targetEntry ? (targetEntry.date || '').slice(0, 7) : null;
+    const ids = new Set(
+      oilChanges
+        .filter(
+          (r) =>
+            r.entryId === highlightEntryId ||
+            (targetYm && r.changeDate.slice(0, 7) === targetYm)
+        )
+        .map((r) => r.id)
+    );
+    if (ids.size === 0) return;
+    setHighlightedIds(ids);
+
+    const firstId = sortOilChangesNewestFirst(oilChanges).find((r) => ids.has(r.id))?.id;
+    const scrollTimer = window.setTimeout(() => {
+      if (firstId && rowRefs.current[firstId]) {
+        rowRefs.current[firstId]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 80);
+    const clearTimer = window.setTimeout(() => setHighlightedIds(new Set()), 2800);
+
+    return () => {
+      window.clearTimeout(scrollTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [highlightEntryId, highlightKey, oilChanges, entries]);
 
   const pendingRecord = pendingDeleteId
     ? oilChanges.find((r) => r.id === pendingDeleteId)
@@ -284,7 +322,13 @@ const OilMaintenanceTab: React.FC<OilMaintenanceTabProps> = ({
               {sorted.map((r) => {
                 const driver = resolveDriver(r);
                 return (
-                  <tr key={r.id}>
+                  <tr
+                    key={r.id}
+                    ref={(el) => {
+                      rowRefs.current[r.id] = el;
+                    }}
+                    className={highlightedIds.has(r.id) ? 'oil-row--highlight' : undefined}
+                  >
                     <td className="tabular-nums whitespace-nowrap">{r.changeDate}</td>
                     <td>
                       {driver ? (
