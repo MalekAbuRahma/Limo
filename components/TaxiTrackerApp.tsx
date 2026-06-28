@@ -5602,9 +5602,10 @@ const SettingsTab: React.FC<{
 
 /* ——— ROI / Break-even ——— */
 
-const RoiSection: React.FC<{ roi: RoiAnalysis; settings: TaxiSettings }> = ({
+const RoiSection: React.FC<{ roi: RoiAnalysis; settings: TaxiSettings; onReport?: () => void }> = ({
   roi,
   settings,
+  onReport,
 }) => {
   const chartPoints = roi.chartData.filter(
     (pt) => pt.monthIndex % 6 === 1 || pt.monthIndex === roi.lifeMonths
@@ -5629,47 +5630,70 @@ const RoiSection: React.FC<{ roi: RoiAnalysis; settings: TaxiSettings }> = ({
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-              <p className="text-xs text-slate-600">متوسط الصافي الشهري</p>
-              <p className="text-xl font-bold text-blue-800 tabular-nums">
-                {fmt(roi.avgMonthlyNet)} د.أ
-              </p>
-              <p className="text-xs text-slate-400 mt-1">من {fmtInt(roi.monthsRecorded)} شهر مسجّل</p>
-            </div>
-            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
-              <p className="text-xs text-slate-600">مدة استرداد رأس المال</p>
-              <p className="text-xl font-bold text-indigo-800 tabular-nums">
-                {fmtInt(roi.breakEvenMonths)} شهر
-              </p>
-              <p className="text-xs text-indigo-700 mt-1">≈ {roi.breakEvenDuration}</p>
-            </div>
-            <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
-              <p className="text-xs text-slate-600">متوقع استرداد كامل بحلول</p>
-              <p className="text-xl font-bold text-purple-800 tabular-nums">
-                {roi.breakEvenPeriodLabel}
-              </p>
-              {roi.monthsRemainingToBreakEven > 0 && (
-                <p className="text-xs text-slate-400 mt-1">
-                  متبقي: {fmtInt(roi.monthsRemainingToBreakEven)} شهر
-                </p>
-              )}
-            </div>
-            <div
-              className={`rounded-xl p-4 border ${
-                roi.recoversWithinLife
-                  ? 'bg-green-50 border-green-200'
-                  : 'bg-red-50 border-red-200'
-              }`}
-            >
-              <p className="text-xs text-slate-600">قبل الشطب ({fmtInt(settings.vehicleLifeYears)} سنوات)</p>
-              <p
-                className={`text-lg font-bold ${
-                  roi.recoversWithinLife ? 'text-green-700' : 'text-red-700'
-                }`}
-              >
-                {roi.recoversWithinLife ? '✓ نعم — تسترد رأس المال' : '✗ لا — لن تسترد كاملاً'}
-              </p>
-            </div>
+            <MiniStatCard
+              label="متوسط الصافي الشهري"
+              value={roi.avgMonthlyNet}
+              valueColor="text-blue-800"
+              cardClass="bg-blue-50 border-blue-200"
+              sub={`من ${fmtInt(roi.monthsRecorded)} شهر مسجّل`}
+              tooltipTitle="متوسط الصافي الشهري"
+              tooltipLines={[
+                { label: 'متوسط صافي الربح شهرياً', amount: roi.avgMonthlyNet },
+                { label: 'أشهر مسجّلة', count: roi.monthsRecorded },
+                { label: 'مجموع الصافي خلال العمر', amount: roi.totalProfitOverLife },
+              ]}
+              onReport={onReport}
+            />
+            <MiniStatCard
+              label="مدة استرداد رأس المال"
+              value={roi.breakEvenMonths}
+              textValue={`${fmtInt(roi.breakEvenMonths)} شهر`}
+              valueColor="text-indigo-800"
+              cardClass="bg-indigo-50 border-indigo-200"
+              sub={`≈ ${roi.breakEvenDuration}`}
+              tooltipTitle="مدة استرداد رأس المال"
+              tooltipLines={[
+                { label: 'تكلفة السيارة', amount: roi.vehicleCost },
+                { label: 'متوسط الصافي الشهري', amount: roi.avgMonthlyNet },
+                { label: 'الأشهر اللازمة', count: roi.breakEvenMonths },
+              ]}
+              onReport={onReport}
+            />
+            <MiniStatCard
+              label="متوقع استرداد كامل بحلول"
+              textValue={roi.breakEvenPeriodLabel}
+              valueColor="text-purple-800"
+              cardClass="bg-purple-50 border-purple-200"
+              sub={
+                roi.monthsRemainingToBreakEven > 0
+                  ? `متبقي: ${fmtInt(roi.monthsRemainingToBreakEven)} شهر`
+                  : undefined
+              }
+              tooltipTitle="تاريخ الاسترداد المتوقع"
+              tooltipLines={[
+                { label: 'الفترة المتوقعة', note: roi.breakEvenPeriodLabel },
+                ...(roi.monthsRemainingToBreakEven > 0
+                  ? [{ label: 'أشهر متبقية', count: roi.monthsRemainingToBreakEven }]
+                  : []),
+              ]}
+              onReport={onReport}
+            />
+            <MiniStatCard
+              label={`قبل الشطب (${fmtInt(settings.vehicleLifeYears)} سنوات)`}
+              textValue={roi.recoversWithinLife ? '✓ نعم — تسترد' : '✗ لا — لن تسترد'}
+              valueColor={roi.recoversWithinLife ? 'text-green-700' : 'text-red-700'}
+              cardClass={roi.recoversWithinLife ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}
+              tooltipTitle="الاسترداد قبل الشطب"
+              tooltipLines={[
+                { label: 'عمر السيارة', count: settings.vehicleLifeYears },
+                { label: 'صافي الربح بعد استرداد التكلفة', amount: roi.netGainAfterCost },
+                {
+                  label: 'النتيجة',
+                  note: roi.recoversWithinLife ? 'تسترد رأس المال قبل الشطب' : 'لن تسترد كامل رأس المال',
+                },
+              ]}
+              onReport={onReport}
+            />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
@@ -5887,56 +5911,76 @@ const DashboardTab: React.FC<{
       <div className="bg-white border border-amber-200 rounded-xl p-5 shadow-sm space-y-4">
         <h3 className="font-semibold text-slate-800">الحوادث والتأمين</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mobile-stat-grid">
-          <div className="bg-orange-50 border border-orange-100 rounded-lg p-3 text-center">
-            <div className="flex justify-center mb-1">
-              <svg className="w-4 h-4 text-orange-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/><line x1="12" y1="2" x2="12" y2="9" strokeDasharray="2 2"/></svg>
-            </div>
-            <p className="text-xs text-slate-600">تكاليف الحوادث</p>
-            <p className="text-lg font-bold text-orange-800 tabular-nums">
-              {fmt(accidentSummary.totalCost)}
-            </p>
-          </div>
-          <div className="bg-green-50 border border-green-100 rounded-lg p-3 text-center">
-            <div className="flex justify-center mb-1">
-              <svg className="w-4 h-4 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            </div>
-            <p className="text-xs text-slate-600">تأمين مستلم</p>
-            <p className="text-lg font-bold text-green-800 tabular-nums">
-              {fmt(accidentSummary.totalInsuranceReceived)}
-            </p>
-          </div>
-          <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 text-center">
-            <div className="flex justify-center mb-1">
-              <svg className="w-4 h-4 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            </div>
-            <p className="text-xs text-slate-600">قيد الانتظار</p>
-            <p className="text-lg font-bold text-amber-800 tabular-nums">
-              {fmtInt(accidentSummary.totalPending)}
-            </p>
-            <p className="text-[10px] text-slate-500">حادث بلا مستلم تأمين</p>
-          </div>
-          <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-center">
-            <div className="flex justify-center mb-1">
-              <svg className="w-4 h-4 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-            </div>
-            <p className="text-xs text-slate-600">مجموع المطالبة</p>
-            <p className="text-lg font-bold text-indigo-800 tabular-nums">
-              {fmt(accidentSummary.totalClaimAmount)}
-            </p>
-          </div>
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
-            <div className="flex justify-center mb-1">
-              <svg className="w-4 h-4 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
-            </div>
-            <p className="text-xs text-slate-600 font-semibold">صافي بعد الحوادث والتأمين</p>
-            <p
-              className={`text-lg font-bold tabular-nums ${
-                accidentSummary.adjustedNetProfit >= 0 ? 'text-blue-800' : 'text-red-700'
-              }`}
-            >
-              {fmt(accidentSummary.adjustedNetProfit)}
-            </p>
-          </div>
+          <MiniStatCard
+            label="تكاليف الحوادث"
+            value={accidentSummary.totalCost}
+            valueColor="text-orange-800"
+            cardClass="bg-orange-50 border-orange-100"
+            icon={<svg className="w-4 h-4 text-orange-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/><line x1="12" y1="2" x2="12" y2="9" strokeDasharray="2 2"/></svg>}
+            tooltipTitle="تكاليف الحوادث"
+            tooltipLines={[
+              { label: 'مجموع تكلفة إصلاح الحوادث', amount: accidentSummary.totalCost },
+              { label: 'عدد الحوادث', count: accidentSummary.count },
+              { label: 'أيام التعطل', count: accidentSummary.totalDowntimeDays },
+            ]}
+            onReport={() => openReport('expenses')}
+          />
+          <MiniStatCard
+            label="تأمين مستلم"
+            value={accidentSummary.totalInsuranceReceived}
+            valueColor="text-green-800"
+            cardClass="bg-green-50 border-green-100"
+            icon={<svg className="w-4 h-4 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>}
+            tooltipTitle="تأمين مستلم"
+            tooltipLines={[
+              { label: 'مجموع التأمين المستلم', amount: accidentSummary.totalInsuranceReceived },
+              { label: 'يُضاف إلى صافي الربح', note: 'يقابل تكاليف الإصلاح' },
+            ]}
+            onReport={() => openReport('net')}
+          />
+          <MiniStatCard
+            label="قيد الانتظار"
+            value={accidentSummary.totalPending}
+            display="count"
+            valueColor="text-amber-800"
+            cardClass="bg-amber-50 border-amber-100"
+            sub="حادث بلا مستلم تأمين"
+            icon={<svg className="w-4 h-4 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>}
+            tooltipTitle="حوادث قيد الانتظار"
+            tooltipLines={[
+              { label: 'حوادث بلا تأمين مستلم', count: accidentSummary.totalPending },
+              { label: 'مجموع المطالبة', amount: accidentSummary.totalClaimAmount },
+            ]}
+            onReport={() => openReport('net')}
+          />
+          <MiniStatCard
+            label="مجموع المطالبة"
+            value={accidentSummary.totalClaimAmount}
+            valueColor="text-indigo-800"
+            cardClass="bg-indigo-50 border-indigo-100"
+            icon={<svg className="w-4 h-4 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>}
+            tooltipTitle="مجموع المطالبة"
+            tooltipLines={[
+              { label: 'إجمالي مبالغ المطالبات', amount: accidentSummary.totalClaimAmount },
+              { label: 'تأمين مستلم', amount: accidentSummary.totalInsuranceReceived, sign: '−' },
+            ]}
+            onReport={() => openReport('net')}
+          />
+          <MiniStatCard
+            label="صافي بعد الحوادث والتأمين"
+            value={accidentSummary.adjustedNetProfit}
+            valueColor={accidentSummary.adjustedNetProfit >= 0 ? 'text-blue-800' : 'text-red-700'}
+            cardClass="bg-blue-50 border-blue-200"
+            icon={<svg className="w-4 h-4 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>}
+            tooltipTitle="صافي بعد الحوادث والتأمين"
+            tooltipLines={[
+              { label: 'صافي الشهور', amount: baseTotals.netProfit },
+              { label: 'تأمين مستلم', amount: accidentSummary.totalInsuranceReceived, sign: '+' },
+              { label: 'إصلاح حوادث', amount: accidentSummary.totalCost, sign: '−' },
+              { label: 'الصافي بعد التعديل', amount: accidentSummary.adjustedNetProfit, sign: '=', emphasize: true },
+            ]}
+            onReport={() => openReport('net')}
+          />
         </div>
         <p className="text-xs text-slate-500">
           صافي الشهور ({fmt(baseTotals.netProfit)}) + تأمين ({fmt(accidentSummary.totalInsuranceReceived)})
@@ -5965,17 +6009,35 @@ const DashboardTab: React.FC<{
     )}
 
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
-        <p className="text-2xl font-bold text-green-700 tabular-nums">{fmtInt(totals.paidCount)}</p>
-        <p className="text-sm text-green-800">شهر مكتمل</p>
-      </div>
-      <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
-        <p className="text-2xl font-bold text-red-700 tabular-nums">{fmtInt(totals.lateCount)}</p>
-        <p className="text-sm text-red-800">شهر غير مكتمل</p>
-      </div>
+      <MiniStatCard
+        label="شهر مكتمل"
+        value={totals.paidCount}
+        display="count"
+        valueColor="text-green-700"
+        cardClass="bg-green-50 border-green-200"
+        tooltipTitle="الأشهر المكتملة"
+        tooltipLines={[
+          { label: 'أشهر مكتملة (الضمان مدفوع كاملاً)', count: totals.paidCount },
+          { label: 'مجموع المدفوع', amount: totals.totalPaid },
+        ]}
+        onReport={() => openReport('paid')}
+      />
+      <MiniStatCard
+        label="شهر غير مكتمل"
+        value={totals.lateCount}
+        display="count"
+        valueColor="text-red-700"
+        cardClass="bg-red-50 border-red-200"
+        tooltipTitle="الأشهر غير المكتملة"
+        tooltipLines={[
+          { label: 'أشهر غير مكتملة', count: totals.lateCount },
+          { label: 'مجموع المتبقي', amount: totals.totalRemaining },
+        ]}
+        onReport={() => openReport('remaining')}
+      />
     </div>
 
-    <RoiSection roi={roi} settings={settings} />
+    <RoiSection roi={roi} settings={settings} onReport={() => openReport('net')} />
 
     {totalOilCost > 0 && (
       <div className="bg-white border border-orange-200 rounded-xl p-5 shadow-sm">
@@ -5985,24 +6047,43 @@ const DashboardTab: React.FC<{
           الربح.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="bg-orange-50 border border-orange-100 rounded-lg p-4 text-center">
-            <p className="text-xs text-slate-600">إجمالي تكلفة الزيت</p>
-            <p className="text-2xl font-bold text-orange-800 tabular-nums mt-1">
-              {fmt(totalOilCost)} د.أ
-            </p>
-          </div>
-          <div className="bg-slate-50 border border-slate-100 rounded-lg p-4 text-center">
-            <p className="text-xs text-slate-600">ضمن ملخص المصاريف</p>
-            <p className="text-2xl font-bold text-slate-800 tabular-nums mt-1">
-              {fmt(oilInSummary)} د.أ
-            </p>
-          </div>
-          <div className="bg-slate-50 border border-slate-100 rounded-lg p-4 text-center">
-            <p className="text-xs text-slate-600">عدد السجلات</p>
-            <p className="text-2xl font-bold text-slate-800 tabular-nums mt-1">
-              {fmtInt(oilChanges.length)}
-            </p>
-          </div>
+          <MiniStatCard
+            label="إجمالي تكلفة الزيت"
+            value={totalOilCost}
+            valueColor="text-orange-800"
+            cardClass="bg-orange-50 border-orange-100"
+            tooltipTitle="إجمالي تكلفة الزيت"
+            tooltipLines={[
+              { label: 'مجموع تكلفة سجلات الزيت', amount: totalOilCost },
+              { label: 'عدد السجلات', count: oilChanges.length },
+            ]}
+            onReport={() => openReport('expenses')}
+          />
+          <MiniStatCard
+            label="ضمن ملخص المصاريف"
+            value={oilInSummary}
+            valueColor="text-slate-800"
+            cardClass="bg-slate-50 border-slate-100"
+            tooltipTitle="الزيت ضمن المصاريف"
+            tooltipLines={[
+              { label: 'تكلفة الزيت المُدرَجة في المصاريف', amount: oilInSummary },
+              { label: 'إجمالي المصاريف', amount: totals.totalExpenses },
+            ]}
+            onReport={() => openReport('expenses')}
+          />
+          <MiniStatCard
+            label="عدد السجلات"
+            value={oilChanges.length}
+            display="count"
+            valueColor="text-slate-800"
+            cardClass="bg-slate-50 border-slate-100"
+            tooltipTitle="سجلات الزيت"
+            tooltipLines={[
+              { label: 'عدد عمليات تغيير الزيت', count: oilChanges.length },
+              { label: 'إجمالي التكلفة', amount: totalOilCost },
+            ]}
+            onReport={() => openReport('expenses')}
+          />
         </div>
       </div>
     )}
@@ -6014,37 +6095,59 @@ const DashboardTab: React.FC<{
           {REPORT_EXPENSE_KEYS.map((key) => {
             const val = totals.expenseByCategory[key];
             if (val <= 0) return null;
+            const catLabel = key === 'oil' ? 'زيت (تبويب الزيت)' : EXPENSE_FIELD_LABELS[key];
             return (
-              <div key={key} className="bg-orange-50 border border-orange-100 rounded-lg p-3 text-center">
-                <p className="text-xs text-slate-600">
-                  {key === 'oil' ? 'زيت (تبويب الزيت)' : EXPENSE_FIELD_LABELS[key]}
-                </p>
-                <p className="text-lg font-bold text-orange-800 tabular-nums">{fmt(val)}</p>
-              </div>
+              <MiniStatCard
+                key={key}
+                label={catLabel}
+                value={val}
+                valueColor="text-orange-800"
+                cardClass="bg-orange-50 border-orange-100"
+                tooltipTitle={catLabel}
+                tooltipLines={[
+                  { label: 'إجمالي هذا البند', amount: val },
+                  { label: 'من إجمالي المصاريف', amount: totals.totalExpenses },
+                ]}
+                onReport={() => openReport('expenses')}
+              />
             );
           })}
           {accidentSummary.totalCost > 0 && (
-            <div className="bg-orange-50 border border-orange-100 rounded-lg p-3 text-center">
-              <p className="text-xs text-slate-600">إصلاح حوادث</p>
-              <p className="text-lg font-bold text-orange-800 tabular-nums">
-                {fmt(accidentSummary.totalCost)}
-              </p>
-            </div>
+            <MiniStatCard
+              label="إصلاح حوادث"
+              value={accidentSummary.totalCost}
+              valueColor="text-orange-800"
+              cardClass="bg-orange-50 border-orange-100"
+              tooltipTitle="إصلاح حوادث"
+              tooltipLines={[
+                { label: 'مجموع تكاليف الإصلاح', amount: accidentSummary.totalCost },
+                { label: 'عدد الحوادث', count: accidentSummary.count },
+              ]}
+              onReport={() => openReport('expenses')}
+            />
           )}
           {licenseSummary.totalPaid > 0 && (
-            <div className="bg-orange-50 border border-orange-100 rounded-lg p-3 text-center">
-              <p className="text-xs text-slate-600">ترخيص سنوي</p>
-              <p className="text-lg font-bold text-orange-800 tabular-nums">
-                {fmt(licenseSummary.totalPaid)}
-              </p>
-            </div>
+            <MiniStatCard
+              label="ترخيص سنوي"
+              value={licenseSummary.totalPaid}
+              valueColor="text-orange-800"
+              cardClass="bg-orange-50 border-orange-100"
+              tooltipTitle="ترخيص سنوي"
+              tooltipLines={[{ label: 'مجموع رسوم الترخيص المدفوعة', amount: licenseSummary.totalPaid }]}
+              onReport={() => openReport('expenses')}
+            />
           )}
-          <div className="bg-orange-100 border border-orange-200 rounded-lg p-3 text-center">
-            <p className="text-xs text-slate-600 font-semibold">إجمالي المصاريف</p>
-            <p className="text-lg font-bold text-orange-900 tabular-nums">
-              {fmt(totals.totalExpenses)}
-            </p>
-          </div>
+          <MiniStatCard
+            label="إجمالي المصاريف"
+            value={totals.totalExpenses}
+            valueColor="text-orange-900"
+            cardClass="bg-orange-100 border-orange-200"
+            tooltipTitle="إجمالي المصاريف"
+            tooltipLines={[
+              { label: 'مجموع كل بنود المصاريف', amount: totals.totalExpenses, emphasize: true },
+            ]}
+            onReport={() => openReport('expenses')}
+          />
         </div>
       </div>
     )}
@@ -6106,17 +6209,11 @@ type StatTooltipLine = {
 };
 
 // ─── StatCard ──────────────────────────────────────────────────────────────────
-const StatCard: React.FC<{
-  label: string;
-  value: number;
-  color: string;
-  icon?: React.ReactNode;
-  tooltipTitle?: string;
-  tooltipLines?: StatTooltipLine[];
-  onReport?: () => void;
-}> = ({ label, value, color, icon, tooltipTitle, tooltipLines, onReport }) => {
+// ─── Shared card tooltip (hover + click) ────────────────────────────────────────
+
+function useCardTooltip(tooltipTitle?: string, tooltipLines?: StatTooltipLine[]) {
   const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLSpanElement>(null);
   const [tipPos, setTipPos] = useState<{ top: number; left: number } | null>(null);
   const hasTooltip = Boolean(tooltipTitle && tooltipLines?.length);
 
@@ -6144,116 +6241,227 @@ const StatCard: React.FC<{
     };
   }, [open, updateTipPos]);
 
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (triggerRef.current && !triggerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, [open]);
+
+  const show = useCallback(() => {
+    updateTipPos();
+    setOpen(true);
+  }, [updateTipPos]);
+  const hide = useCallback(() => setOpen(false), []);
+  const toggle = useCallback(() => {
+    updateTipPos();
+    setOpen((v) => !v);
+  }, [updateTipPos]);
+
   const tooltipPanel =
-    open &&
-    hasTooltip &&
-    tipPos &&
-    createPortal(
-      <div
-        className="claim-cell-tooltip-panel claim-cell-tooltip-panel--portal stat-card-tooltip-panel"
-        data-theme={getTaxiDisplayTheme()}
-        role="tooltip"
-        style={{
-          position: 'fixed',
-          top: tipPos.top,
-          left: tipPos.left,
-          width: Math.min(260, window.innerWidth - 16),
-          zIndex: 300,
-          pointerEvents: 'none',
-        }}
-      >
-        <div className="claim-cell-tooltip-title">{tooltipTitle}</div>
-        <div className="claim-cell-tooltip-body stat-card-tooltip-body">
-          {tooltipLines!.map((line, i) =>
-            line.note ? (
-              <div key={i} className="stat-card-tooltip-note">
-                {line.label}: {line.note}
-              </div>
-            ) : (
-              <div
-                key={i}
-                className={`stat-card-tooltip-line${line.emphasize ? ' stat-card-tooltip-line--total' : ''}`}
-              >
-                <span className="stat-card-tooltip-line-label">
-                  {line.sign === '+' && <span className="text-green-600">+ </span>}
-                  {line.sign === '−' && <span className="text-red-600">− </span>}
-                  {line.sign === '=' && <span className="text-slate-700">= </span>}
-                  {line.label}
-                </span>
-                <span className="tabular-nums font-medium shrink-0">
-                  {line.count != null ? fmtInt(line.count) : `${fmt(line.amount ?? 0)} د.أ`}
-                </span>
-              </div>
-            )
-          )}
-        </div>
-      </div>,
-      document.body
-    );
+    open && hasTooltip && tipPos
+      ? createPortal(
+          <div
+            className="claim-cell-tooltip-panel claim-cell-tooltip-panel--portal stat-card-tooltip-panel"
+            data-theme={getTaxiDisplayTheme()}
+            role="tooltip"
+            style={{
+              position: 'fixed',
+              top: tipPos.top,
+              left: tipPos.left,
+              width: Math.min(260, window.innerWidth - 16),
+              zIndex: 300,
+              pointerEvents: 'none',
+            }}
+          >
+            <div className="claim-cell-tooltip-title">{tooltipTitle}</div>
+            <div className="claim-cell-tooltip-body stat-card-tooltip-body">
+              {tooltipLines!.map((line, i) =>
+                line.note ? (
+                  <div key={i} className="stat-card-tooltip-note">
+                    {line.label}: {line.note}
+                  </div>
+                ) : (
+                  <div
+                    key={i}
+                    className={`stat-card-tooltip-line${line.emphasize ? ' stat-card-tooltip-line--total' : ''}`}
+                  >
+                    <span className="stat-card-tooltip-line-label">
+                      {line.sign === '+' && <span className="text-green-600">+ </span>}
+                      {line.sign === '−' && <span className="text-red-600">− </span>}
+                      {line.sign === '=' && <span className="text-slate-700">= </span>}
+                      {line.label}
+                    </span>
+                    <span className="tabular-nums font-medium shrink-0">
+                      {line.count != null ? fmtInt(line.count) : `${fmt(line.amount ?? 0)} د.أ`}
+                    </span>
+                  </div>
+                )
+              )}
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
+  return { hasTooltip, triggerRef, show, hide, toggle, tooltipPanel };
+}
+
+type CardTooltip = ReturnType<typeof useCardTooltip>;
+
+/** Info (ⓘ) icon that reveals the quick-preview tooltip on hover or click. */
+const CardInfoIcon: React.FC<{ tip: CardTooltip; label: string }> = ({ tip, label }) => (
+  <span
+    ref={tip.triggerRef}
+    className="stat-card-info-icon shrink-0 cursor-help"
+    tabIndex={0}
+    role="button"
+    aria-label={`${label} — معاينة سريعة`}
+    onMouseEnter={tip.show}
+    onMouseLeave={tip.hide}
+    onFocus={tip.show}
+    onBlur={tip.hide}
+    onClick={(e) => {
+      e.stopPropagation();
+      tip.toggle();
+    }}
+  >
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4M12 8h.01" />
+    </svg>
+    {tip.tooltipPanel}
+  </span>
+);
+
+const StatCard: React.FC<{
+  label: string;
+  value: number;
+  color: string;
+  icon?: React.ReactNode;
+  tooltipTitle?: string;
+  tooltipLines?: StatTooltipLine[];
+  onReport?: () => void;
+}> = ({ label, value, color, icon, tooltipTitle, tooltipLines, onReport }) => {
+  const tip = useCardTooltip(tooltipTitle, tooltipLines);
+  const clickable = Boolean(onReport);
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+    <div
+      className={`bg-white border border-slate-200 rounded-xl p-4 shadow-sm transition${
+        clickable ? ' cursor-pointer hover:shadow-md hover:border-slate-300' : ''
+      }`}
+      onClick={onReport}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      aria-label={clickable ? `${label} — عرض التقرير` : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onReport?.();
+              }
+            }
+          : undefined
+      }
+    >
       <div className="flex items-start justify-between gap-2 mb-2">
         {icon && (
           <div className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-slate-50 text-slate-400">
             {icon}
           </div>
         )}
-        <div
-          ref={triggerRef}
-          className={`flex-1 min-w-0 flex items-center gap-1${hasTooltip ? ' stat-card-label-row--has-tip cursor-default' : ''}`}
-          onMouseEnter={() => {
-            if (!hasTooltip) return;
-            updateTipPos();
-            setOpen(true);
-          }}
-          onMouseLeave={() => setOpen(false)}
-          onFocus={() => {
-            if (!hasTooltip) return;
-            updateTipPos();
-            setOpen(true);
-          }}
-          onBlur={() => setOpen(false)}
-          tabIndex={hasTooltip ? 0 : undefined}
-          role={hasTooltip ? 'button' : undefined}
-          aria-label={hasTooltip ? `${label} — اعرض طريقة الحساب` : undefined}
-        >
+        <div className="flex-1 min-w-0 flex items-center gap-1">
           <p className="text-xs text-slate-500 leading-tight">{label}</p>
-          {hasTooltip && (
-            <span className="stat-card-info-icon shrink-0" aria-hidden>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 16v-4M12 8h.01" />
-              </svg>
-            </span>
-          )}
+          {tip.hasTooltip && <CardInfoIcon tip={tip} label={label} />}
         </div>
         {onReport && (
-          <button
-            onClick={onReport}
-            title="عرض التقرير التفصيلي"
-            className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:bg-green-50 hover:text-green-600 transition-colors border border-transparent hover:border-green-200"
+          <span
+            className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 border border-transparent"
+            aria-hidden
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
-              <rect x="3" y="3" width="18" height="18" rx="2"/>
-              <path d="M3 9h18M3 15h18M9 3v18"/>
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M3 9h18M3 15h18M9 3v18" />
             </svg>
-          </button>
+          </span>
         )}
       </div>
       <p className={`text-xl font-bold tabular-nums ${color}`}>{fmt(value)} د.أ</p>
       {onReport ? (
-        <button
-          type="button"
-          onClick={onReport}
-          className="text-[10px] text-slate-400 mt-1 hover:text-blue-600 transition-colors"
-        >
-          عرض التفاصيل
-        </button>
-      ) : hasTooltip ? (
-        <p className="text-[10px] text-slate-400 mt-1">مرّر للتفاصيل</p>
+        <p className="text-[10px] text-slate-400 mt-1">عرض التفاصيل ←</p>
+      ) : tip.hasTooltip ? (
+        <p className="text-[10px] text-slate-400 mt-1">مرّر أو اضغط ⓘ للتفاصيل</p>
       ) : null}
-      {tooltipPanel}
+    </div>
+  );
+};
+
+/** Compact, optionally-clickable dashboard card with hover/click quick preview. */
+const MiniStatCard: React.FC<{
+  label: string;
+  value?: number;
+  display?: 'currency' | 'count';
+  textValue?: string;
+  sub?: string;
+  valueColor?: string;
+  cardClass?: string;
+  icon?: React.ReactNode;
+  tooltipTitle?: string;
+  tooltipLines?: StatTooltipLine[];
+  onReport?: () => void;
+}> = ({
+  label,
+  value = 0,
+  display = 'currency',
+  textValue,
+  sub,
+  valueColor = 'text-slate-800',
+  cardClass = 'bg-white border-slate-200',
+  icon,
+  tooltipTitle,
+  tooltipLines,
+  onReport,
+}) => {
+  const tip = useCardTooltip(tooltipTitle, tooltipLines);
+  const clickable = Boolean(onReport);
+  const valueText =
+    textValue != null ? textValue : display === 'count' ? fmtInt(value) : `${fmt(value)} د.أ`;
+
+  return (
+    <div
+      className={`relative rounded-lg border p-3 text-center transition ${cardClass}${
+        clickable ? ' cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''
+      }`}
+      onClick={onReport}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      aria-label={clickable ? `${label} — عرض التقرير` : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onReport?.();
+              }
+            }
+          : undefined
+      }
+    >
+      {tip.hasTooltip && (
+        <div className="absolute top-1.5 left-1.5 text-slate-400">
+          <CardInfoIcon tip={tip} label={label} />
+        </div>
+      )}
+      {icon && <div className="flex justify-center mb-1">{icon}</div>}
+      <p className="text-xs text-slate-600">{label}</p>
+      <p className={`text-lg font-bold tabular-nums ${valueColor}`}>{valueText}</p>
+      {sub && <p className="text-[10px] text-slate-500 mt-0.5">{sub}</p>}
     </div>
   );
 };
